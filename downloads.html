@@ -168,7 +168,10 @@ img,svg{ display:block; max-width:100%; }
 .rating{
   flex:1 1 180px; padding:22px 26px 22px 0; display:flex; flex-direction:column; gap:4px;
   border-right:1px solid var(--ct-bg-cream-2);
+  text-decoration:none; transition:opacity .25s var(--ct-ease-enter);
 }
+a.rating:hover{ opacity:.62; }
+a.rating:focus-visible{ outline:2px solid var(--ct-brand-orange); outline-offset:4px; }
 .rating:last-child{ border-right:none; }
 .rating-score{ font-family:var(--ct-font-display); font-size:30px; color:var(--ct-ink-primary); line-height:1; }
 .rating-stars{ display:flex; gap:3px; margin:6px 0 2px; }
@@ -178,6 +181,32 @@ img,svg{ display:block; max-width:100%; }
   position:absolute; inset:0; overflow:hidden; color:var(--ct-brand-orange);
 }
 .rating-meta{ font-size:13px; color:var(--ct-ink-muted); }
+.rating-score--plain{ font-size:26px; }
+.stars-spacer{ display:block; height:14px; margin:6px 0 2px; }
+
+/* ---------- Reviews ---------- */
+.reviews{ display:grid; gap:20px; grid-template-columns:repeat(2, 1fr); }
+@media (max-width:760px){ .reviews{ grid-template-columns:1fr; } }
+.review{
+  background:var(--ct-bg-cream-3); border:1px solid var(--ct-bg-cream-2);
+  border-radius:var(--ct-radius-lg); padding:30px 28px;
+  display:flex; flex-direction:column; gap:14px;
+}
+.review .rating-stars{ margin:0; }
+.review h3{ font-size:21px; }
+.review blockquote{
+  margin:0; font-size:17px; line-height:1.6; color:var(--ct-ink-body);
+  max-width:52ch;
+}
+.review-meta{
+  margin-top:auto; padding-top:8px; font-size:13px; color:var(--ct-ink-muted);
+  display:flex; flex-wrap:wrap; gap:8px; align-items:baseline;
+}
+.review-meta strong{ color:var(--ct-ink-body); font-weight:600; }
+.review-meta a{ color:var(--ct-ink-body); text-decoration:underline; text-underline-offset:3px; }
+.review-meta a:hover{ color:var(--ct-brand-orange); }
+.reviews-note{ margin-top:22px; font-size:14px; color:var(--ct-ink-muted); }
+.reviews-note a{ color:var(--ct-ink-primary); text-decoration:underline; text-underline-offset:3px; }
 .rating-name{ font-size:14px; font-weight:600; color:var(--ct-ink-body); }
 
 /* ---------- Section shell ---------- */
@@ -373,31 +402,34 @@ img,svg{ display:block; max-width:100%; }
       </div>
       </div>
 
-      <div class="ratings" aria-label="App store ratings">
-        <div class="rating">
-          <span class="rating-score">4.6</span>
-          <span class="rating-stars" aria-hidden="true"></span>
-          <span class="rating-name">Google Play</span>
-          <span class="rating-meta">7.1K ratings</span>
-        </div>
-        <div class="rating">
-          <span class="rating-score">4.5</span>
-          <span class="rating-stars" aria-hidden="true"></span>
-          <span class="rating-name">App Store</span>
-          <span class="rating-meta">6.6K ratings</span>
-        </div>
-        <div class="rating">
+      <!-- Every figure below was read off the live listing (screenshots, 3 Sep 2026).
+           Google Play's rating was not visible in that capture, so the badge shows
+           the download count, which was. Do not raise any of these without a fresh look. -->
+      <div class="ratings" aria-label="Ratings and installs">
+        <a class="rating" href="https://apps.apple.com/us/app/cloaked/id1600487147">
           <span class="rating-score">4.4</span>
           <span class="rating-stars" aria-hidden="true"></span>
-          <span class="rating-name">Chrome Web Store</span>
-          <span class="rating-meta">Browser extension</span>
-        </div>
-        <div class="rating">
+          <span class="rating-name">App Store</span>
+          <span class="rating-meta">7.8K ratings</span>
+        </a>
+        <a class="rating" href="https://play.google.com/store/apps/details?id=app.android.cloaked">
+          <span class="rating-score rating-score--plain">100K+</span>
+          <span class="stars-spacer" aria-hidden="true"></span>
+          <span class="rating-name">Google Play</span>
+          <span class="rating-meta">Downloads</span>
+        </a>
+        <a class="rating" href="https://chromewebstore.google.com/detail/cloaked-privacy-password/oppdbdefikkkihgbliidckokhgcmmiga">
           <span class="rating-score">4.0</span>
           <span class="rating-stars" aria-hidden="true"></span>
+          <span class="rating-name">Chrome Web Store</span>
+          <span class="rating-meta">49 ratings · 10,000 users</span>
+        </a>
+        <a class="rating" href="https://www.trustpilot.com/review/cloaked.com">
+          <span class="rating-score">3.7</span>
+          <span class="rating-stars" aria-hidden="true"></span>
           <span class="rating-name">Trustpilot</span>
-          <span class="rating-meta">Verified reviews</span>
-        </div>
+          <span class="rating-meta">660 reviews</span>
+        </a>
       </div>
     </div>
   </section>
@@ -418,15 +450,15 @@ img,svg{ display:block; max-width:100%; }
           <div class="card-icon">
             <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M16.36 12.66c-.02-2.3 1.88-3.4 1.96-3.46-1.07-1.56-2.73-1.78-3.32-1.8-1.41-.14-2.76.83-3.48.83-.72 0-1.83-.81-3.01-.79-1.55.02-2.98.9-3.78 2.29-1.61 2.79-.41 6.92 1.16 9.19.77 1.11 1.68 2.36 2.88 2.31 1.16-.05 1.6-.75 3-.75 1.4 0 1.79.75 3.01.72 1.24-.02 2.03-1.13 2.79-2.25.88-1.29 1.24-2.54 1.26-2.6-.03-.01-2.42-.93-2.44-3.69zM14.1 5.9c.64-.78 1.07-1.86.95-2.94-.92.04-2.03.61-2.69 1.38-.59.69-1.11 1.79-.97 2.85 1.02.08 2.07-.52 2.71-1.29z"/></svg>
           </div>
-          <h3>iPhone &amp; iPad</h3>
-          <p class="card-req">iOS · App Store</p>
+          <h3>iPhone</h3>
+          <p class="card-req">iOS 18.0 or later · App Store</p>
           <p class="card-copy">
             Create identities on the go, screen calls with Call Guard, and get alerts the
             moment your data shows up somewhere it shouldn't.
           </p>
           <div class="card-foot">
             <a class="btn btn--card" href="https://apps.apple.com/us/app/cloaked/id1600487147">Download for iOS</a>
-            <span class="card-alt">Rated 4.5 by 6.6K people on the App Store.</span>
+            <span class="card-alt">Rated 4.4 by 7.8K people on the App Store.</span>
           </div>
         </article>
 
@@ -463,7 +495,7 @@ img,svg{ display:block; max-width:100%; }
           </p>
           <div class="card-foot">
             <a class="btn btn--card" href="https://chromewebstore.google.com/detail/cloaked-privacy-password/oppdbdefikkkihgbliidckokhgcmmiga">Add to browser</a>
-            <span class="card-alt">Installs from the Chrome Web Store.</span>
+            <span class="card-alt">10,000 users on the Chrome Web Store.</span>
           </div>
         </article>
 
@@ -485,6 +517,55 @@ img,svg{ display:block; max-width:100%; }
         </article>
 
       </div>
+    </div>
+  </section>
+
+  <!-- ============ REVIEWS ============ -->
+  <!-- Quoted verbatim from the public App Store listing (captured 3 Sep 2026).
+       Each quote is trimmed at a sentence boundary; nothing is paraphrased.
+       Only add to this section from a listing you have actually looked at. -->
+  <section class="section" style="padding-top:0">
+    <div class="wrap">
+      <div class="section-head">
+        <h2>What people say</h2>
+        <p>Reviews from the App Store, quoted as they were written.</p>
+      </div>
+
+      <div class="reviews">
+        <article class="review">
+          <span class="rating-stars" data-score="5" aria-hidden="true"></span>
+          <h3>Cloaked is magic get it now</h3>
+          <blockquote>
+            &ldquo;I was getting 20&ndash;30 spam calls every single day &mdash; everything
+            from loan offers and auto insurance pitches to fake IRS scams and other garbage.
+            It got so bad I was seriously about to change my phone number.&rdquo;
+          </blockquote>
+          <p class="review-meta">
+            <strong>Defense guy</strong> <span>&middot;</span> <span>Aug 16</span>
+            <span>&middot;</span>
+            <a href="https://apps.apple.com/us/app/cloaked/id1600487147">App Store</a>
+          </p>
+        </article>
+
+        <article class="review">
+          <span class="rating-stars" data-score="4" aria-hidden="true"></span>
+          <h3>Almost flawless job developers</h3>
+          <blockquote>
+            &ldquo;I absolutely love it &mdash; it&rsquo;s by far the best app for managing
+            usernames, passwords, one-time passcodes, phone numbers, and more.&rdquo;
+          </blockquote>
+          <p class="review-meta">
+            <strong>Summersuit</strong> <span>&middot;</span> <span>14 Dec 2024</span>
+            <span>&middot;</span>
+            <a href="https://apps.apple.com/us/app/cloaked/id1600487147">App Store</a>
+          </p>
+        </article>
+      </div>
+
+      <p class="reviews-note">
+        Rated 4.4 out of 5 from 7.8K ratings.
+        <a href="https://apps.apple.com/us/app/cloaked/id1600487147">Read every review on the App Store</a>.
+      </p>
     </div>
   </section>
 
@@ -532,9 +613,8 @@ img,svg{ display:block; max-width:100%; }
         </thead>
         <tbody>
           <tr>
-            <td>iPhone &amp; iPad</td>
-            <!-- PLACEHOLDER: replace with the real minimum iOS version from the App Store listing. -->
-            <td data-label="Requirements">iOS — see the App Store listing</td>
+            <td>iPhone</td>
+            <td data-label="Requirements">iOS 18.0 or later — iPhone only, no iPad app</td>
             <td data-label="Get it from"><a href="https://apps.apple.com/us/app/cloaked/id1600487147">App Store</a></td>
           </tr>
           <tr>
@@ -635,9 +715,11 @@ img,svg{ display:block; max-width:100%; }
   /* ---- Star glyphs for the ratings strip ---- */
   var STAR = '<svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">' +
              '<path d="M10 1.6l2.47 5.36 5.86.7-4.33 4 1.16 5.79L10 14.5l-5.16 2.95L6 11.66l-4.33-4 5.86-.7z"/></svg>';
-  document.querySelectorAll('.rating').forEach(function (row) {
-    var score = parseFloat(row.querySelector('.rating-score').textContent);
-    var holder = row.querySelector('.rating-stars');
+  document.querySelectorAll('.rating-stars').forEach(function (holder) {
+    var row = holder.closest('.rating');
+    var score = holder.dataset.score
+      ? parseFloat(holder.dataset.score)
+      : parseFloat(row.querySelector('.rating-score').textContent);
     for (var i = 1; i <= 5; i++) {
       /* Partial fill on the last star mirrors how the CDS star graphics clip. */
       var fill = Math.max(0, Math.min(1, score - (i - 1)));
@@ -648,7 +730,10 @@ img,svg{ display:block; max-width:100%; }
       holder.appendChild(star);
     }
     holder.setAttribute('aria-hidden', 'true');
-    row.setAttribute('aria-label', score + ' out of 5 on ' + row.querySelector('.rating-name').textContent);
+    if (row) {
+      row.setAttribute('aria-label',
+        score + ' out of 5 on ' + row.querySelector('.rating-name').textContent);
+    }
   });
 
   /* ---- Surface the visitor's platform in the hero CTA ---- */
