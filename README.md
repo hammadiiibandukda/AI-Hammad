@@ -4,8 +4,9 @@ A workspace repository, set up for development with [Claude Code](https://claude
 
 ## Overview
 
-This repository is currently a fresh scaffold. It's ready to grow into a real
-project — add source code, tests, and tooling as the work takes shape.
+A place for Cloaked design/marketing prototypes and working files. Prototypes
+are plain HTML + CSS, single file, no build step — open them directly in a
+browser.
 
 ## Getting started
 
@@ -18,7 +19,8 @@ project — add source code, tests, and tooling as the work takes shape.
 
 ```
 .
-├── README.md      Project overview (this file)
-├── CLAUDE.md      Context and conventions for Claude Code
-└── .gitignore     Ignored files and directories
+├── README.md        Project overview (this file)
+├── CLAUDE.md        Context and conventions for Claude Code
+├── downloads.html   cloaked.com/downloads page prototype
+└── .gitignore       Ignored files and directories
 ```
