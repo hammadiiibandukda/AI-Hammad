@@ -1,0 +1,571 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Cloaked — living mark</title>
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<style>
+  :root { --cream:#FBF8EF; --ink:#130F02; --muted:#A09C8F; }
+  html,body { height:100%; margin:0; background:var(--cream); overscroll-behavior:none; }
+  body { display:grid; place-items:center; font:400 13px/1.5 ui-sans-serif,system-ui,sans-serif;
+         color:var(--muted); -webkit-font-smoothing:antialiased; }
+  canvas { display:block; touch-action:none; cursor:grab; }
+  canvas.grabbing { cursor:grabbing; }
+  #hint { position:fixed; left:0; right:0; bottom:26px; text-align:center; letter-spacing:.02em;
+          pointer-events:none; transition:opacity .6s ease; }
+  #hint.gone { opacity:0; }
+  #fallback { display:none; }
+  @media (prefers-reduced-motion: reduce) { #hint { display:none; } }
+</style>
+
+<canvas id="stage"></canvas>
+<div id="hint">drag it · flick it · let go</div>
+<svg id="fallback" width="420" height="284" viewBox="72.2972 91.7177 84.8388 57.2823" aria-label="Cloaked">
+  <path d="M97.2728 149C97.2728 149 72.2972 140.278 77.789 131.071C81.2884 125.256 89.2806 131.555 101.766 137.854L97.2671 149H97.2728Z" fill="#D0470C"/>
+  <path d="M127.746 146.09C146.728 147.541 155.137 139.361 157.136 136.943C157.136 136.943 145.802 123.19 139.125 113.962C134.576 107.679 128.751 98.7473 125.415 93.5611C124.23 91.7177 121.397 91.793 120.189 93.6256C107.794 112.371 84.9689 126.425 79.8496 129.134C83.8965 127.532 91.2791 132.525 101.275 137.856C101.275 137.856 108.697 141.532 113.726 143.236C120.172 145.418 127.752 146.095 127.752 146.095L127.746 146.09Z" fill="#FF6625"/>
+</svg>
+
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.186.0/build/three.module.js" } }
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+
+// ===========================================================================
+// 1 · The mark, as geometry
+//
+// The Cloaked mark is a drawing of a draped cloth: an apex it hangs from, two
+// edges sweeping down to a left and a right tip, a hem between them, and the
+// bottom-left corner curled backwards so the reverse of the fabric shows. The
+// dark fill is not a second colour, it is the back face.
+//
+// So the rest pose is built to project back onto the artwork exactly: the
+// surface is a Coons patch over the four real boundary curves, and all depth
+// is added in Z, which cannot move the silhouette.
+// ===========================================================================
+
+const SEG = {
+  bottomRight: [[127.746,146.09],[146.728,147.541],[155.137,139.361],[157.136,136.943]],
+  rightLower:  [[157.136,136.943],[157.136,136.943],[145.802,123.19],[139.125,113.962]],
+  rightUpper:  [[139.125,113.962],[134.576,107.679],[128.751,98.7473],[125.415,93.5611]],
+  apexCap:     [[125.415,93.5611],[124.23,91.7177],[121.397,91.793],[120.189,93.6256]],
+  leftEdge:    [[120.189,93.6256],[107.794,112.371],[84.9689,126.425],[79.8496,129.134]],
+  hem1:        [[79.8496,129.134],[83.8965,127.532],[91.2791,132.525],[101.275,137.856]],
+  hem2:        [[101.275,137.856],[101.275,137.856],[108.697,141.532],[113.726,143.236]],
+  hem3:        [[113.726,143.236],[120.172,145.418],[127.752,146.095],[127.752,146.095]],
+};
+
+const cubic = (p0,p1,p2,p3,t) => {
+  const m=1-t, a=m*m*m, b=3*m*m*t, c=3*m*t*t, d=t*t*t;
+  return [a*p0[0]+b*p1[0]+c*p2[0]+d*p3[0], a*p0[1]+b*p1[1]+c*p2[1]+d*p3[1]];
+};
+
+// Arc-length parameterised polyline, so grid lines land evenly along the real
+// curve instead of bunching where the beziers are dense.
+function polyline(segs, per = 96) {
+  const pts = [];
+  segs.forEach((s,i) => { for (let k = i===0?0:1; k<=per; k++) pts.push(cubic(s[0],s[1],s[2],s[3],k/per)); });
+  const cum = [0];
+  for (let i=1;i<pts.length;i++) cum.push(cum[i-1] + Math.hypot(pts[i][0]-pts[i-1][0], pts[i][1]-pts[i-1][1]));
+  const total = cum[cum.length-1];
+  return { pts, total, at(s) {
+    const target = Math.min(Math.max(s,0),1) * total;
+    let lo=0, hi=cum.length-1;
+    while (lo < hi-1) { const mid=(lo+hi)>>1; if (cum[mid]<=target) lo=mid; else hi=mid; }
+    const span = cum[hi]-cum[lo], f = span>1e-9 ? (target-cum[lo])/span : 0;
+    return [pts[lo][0]+(pts[hi][0]-pts[lo][0])*f, pts[lo][1]+(pts[hi][1]-pts[lo][1])*f];
+  }};
+}
+const reverse = (segs) => segs.slice().reverse().map(s => [s[3],s[2],s[1],s[0]]);
+
+const TOP    = polyline(reverse([SEG.apexCap]));
+const RIGHT  = polyline(reverse([SEG.rightUpper]).concat(reverse([SEG.rightLower])));
+const LEFT   = polyline([SEG.leftEdge]);
+const BOTTOM = polyline([SEG.hem1, SEG.hem2, SEG.hem3, SEG.bottomRight]);
+const U_HINGE = polyline([SEG.hem1]).total / BOTTOM.total;   // where the crease runs out
+
+const BBOX = { x0:72.2972, y0:91.7177, x1:157.136, y1:149 };
+const CX = (BBOX.x0+BBOX.x1)/2, CY = (BBOX.y0+BBOX.y1)/2;
+const SCALE = 2.0 / (BBOX.x1-BBOX.x0);
+const toWorld = (p) => [(p[0]-CX)*SCALE, -(p[1]-CY)*SCALE];
+const VIEW = { hw:1.0, hh:(BBOX.y1-BBOX.y0)*SCALE/2 };       // frustum matching the viewBox
+
+function coons(u,v) {
+  const t=TOP.at(u), b=BOTTOM.at(u), l=LEFT.at(v), r=RIGHT.at(v);
+  const c00=TOP.at(0), c10=TOP.at(1), c01=BOTTOM.at(0), c11=BOTTOM.at(1);
+  const out=[0,0];
+  for (let i=0;i<2;i++) out[i] = (1-v)*t[i] + v*b[i] + (1-u)*l[i] + u*r[i]
+    - ((1-u)*(1-v)*c00[i] + u*(1-v)*c10[i] + (1-u)*v*c01[i] + u*v*c11[i]);
+  return out;
+}
+
+const KNOBS = {
+  // Fitted against the artwork: the frozen front view reproduces the original
+  // at 99.3% body / 89.8% fold / 98.8% overall silhouette (see verify.mjs).
+  depth: 0.46, bulgePow: 1.35, fallPow: 1.15, apexPush: 0.10,
+  leftBack: 0.601,      // left wing turns away from camera
+  leftPow: 2.3262,
+  curlLen: 1.0024,        // fabric beyond the crease at the left tip
+  curlEndFrac: 0.8828,// how much survives at the hinge, where the corner is cut
+  curlTaper: 3.2,    // how the fold runs out along the crease
+  curlAngle: 5.0917,    // turnover at the tip; past a right angle shows the reverse
+  curlAngleEnd: 0.7145,
+  curlEase: 1.2788,      // how sharply the crease turns over
+  curlOpen: 0.4943,      // how far the reversed flap reaches past the near side
+  curlLift: 0.954, curlAxis: -1.768,
+};
+
+const clamp01 = x => x<0?0:x>1?1:x;
+const sub=(a,b)=>[a[0]-b[0],a[1]-b[1],a[2]-b[2]];
+const cross=(a,b)=>[a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0]];
+const dot=(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
+const norm=(a)=>{const l=Math.hypot(a[0],a[1],a[2])||1; return [a[0]/l,a[1]/l,a[2]/l];};
+
+function draped(u,v,k) {
+  const [x,y] = toWorld(coons(u,v));
+  const across = Math.pow(Math.sin(Math.PI*clamp01(u)), k.bulgePow);
+  const down = Math.pow(clamp01(v), k.fallPow);
+  let z = k.depth*across*down;
+  z -= k.leftBack * Math.pow(1-clamp01(u), k.leftPow) * down;   // left wing turns away
+  z += k.apexPush * Math.pow(1-clamp01(v), 3);
+  return [x,y,z];
+}
+
+// Fabric continuing past the crease, rolling backwards. Past a right angle it
+// presents its reverse side to the camera — that is the dark lobe, generated
+// by the fold rather than drawn.
+function foldFrame(u,k) {
+  const e = 1/512;
+  const c = draped(u,1,k);
+  const tangent = norm(sub(draped(Math.min(u+e,1),1,k), draped(Math.max(u-e,0),1,k)));
+  const down = sub(c, draped(u,1-e,k));
+  const outward = norm(sub(down, tangent.map(t => t*dot(down,tangent))));
+  let normal = norm(cross(tangent,outward));
+  if (normal[2] < 0) normal = normal.map(n=>-n);
+  return { c, tangent, outward, normal };
+}
+
+// Length and turnover vary along the crease: most fabric at the left tip,
+// running down to a cut corner at the hinge, which is the straight edge the
+// artwork shows there.
+function foldProfile(u,k) {
+  const s = clamp01((U_HINGE-u)/U_HINGE);
+  return {
+    len: k.curlLen * (k.curlEndFrac + (1-k.curlEndFrac)*Math.pow(s, k.curlTaper)),
+    phi: k.curlAngle * (k.curlAngleEnd + (1-k.curlAngleEnd)*Math.pow(s, k.curlTaper*0.6)),
+  };
+}
+
+function foldPoint(u,w,k) {
+  const { c, outward, normal } = foldFrame(u,k);
+  const { len, phi } = foldProfile(u,k);
+  if (len <= 1e-6) return c;
+  // curlEase front-loads the rotation so the cloth turns over right at the
+  // crease and the rest of the flap reaches outward already reversed. That is
+  // what lets a backward fold still show its underside from the front.
+  const th = phi * Math.pow(clamp01(w), k.curlEase);
+  const radius = len / Math.max(phi, 1e-3);
+  const side = cross(outward, normal);
+  const ca = Math.cos(k.curlAxis), sa = Math.sin(k.curlAxis);
+  const back = norm([
+    -normal[0]*ca + side[0]*sa,
+    -normal[1]*ca + side[1]*sa + k.curlLift,
+    -normal[2]*ca + side[2]*sa,
+  ]);
+  const reach = radius*Math.sin(th) + k.curlOpen*len*clamp01(w);
+  const lift  = radius*(1-Math.cos(th));
+  return [
+    c[0] + reach*outward[0] + lift*back[0],
+    c[1] + reach*outward[1] + lift*back[1],
+    c[2] + reach*outward[2] + lift*back[2],
+  ];
+}
+
+function buildRestMesh(nu, nv, nw, k) {
+  const nuFold = Math.max(2, Math.round(U_HINGE*nu));
+  const bodyCount = (nu+1)*(nv+1);
+  const count = bodyCount + (nuFold+1)*nw;
+  const rest = new Float32Array(count*3), uvs = new Float32Array(count*2);
+  const bodyIdx = (i,j) => j*(nu+1)+i;
+  const foldIdx = (i,w) => w===0 ? bodyIdx(i,nv) : bodyCount + (w-1)*(nuFold+1) + i;
+
+  for (let j=0;j<=nv;j++) for (let i=0;i<=nu;i++) {
+    const n=bodyIdx(i,j), p=draped(i/nu, j/nv, k);
+    rest[n*3]=p[0]; rest[n*3+1]=p[1]; rest[n*3+2]=p[2];
+    uvs[n*2]=i/nu; uvs[n*2+1]=1-j/nv;
+  }
+  for (let w=1;w<=nw;w++) for (let i=0;i<=nuFold;i++) {
+    const n=foldIdx(i,w), p=foldPoint(i/nu, w/nw, k);
+    rest[n*3]=p[0]; rest[n*3+1]=p[1]; rest[n*3+2]=p[2];
+    uvs[n*2]=i/nu; uvs[n*2+1]=-w/nw;
+  }
+
+  const tris=[];
+  for (let j=0;j<nv;j++) for (let i=0;i<nu;i++) {
+    const a=bodyIdx(i,j), b=bodyIdx(i+1,j), c=bodyIdx(i+1,j+1), d=bodyIdx(i,j+1);
+    tris.push(a,d,c, a,c,b);
+  }
+  for (let w=0;w<nw;w++) for (let i=0;i<nuFold;i++) {
+    const a=foldIdx(i,w), b=foldIdx(i+1,w), c=foldIdx(i+1,w+1), d=foldIdx(i,w+1);
+    tris.push(a,d,c, a,c,b);
+  }
+
+  // v=0 is the apex the cloak hangs from; the hold falls off fast below it.
+  const anchor = new Float32Array(count);
+  for (let j=0;j<=nv;j++) { const hold=Math.pow(1-j/nv,5); for (let i=0;i<=nu;i++) anchor[bodyIdx(i,j)]=hold; }
+
+  return { rest, uvs, anchor, nu, nv, nw, nuFold, bodyCount, count,
+           indices: new Uint32Array(tris), bodyIdx, foldIdx };
+}
+
+// ===========================================================================
+// 2 · Cloth solver — Verlet with distance constraints, tuned for silk
+//
+// There is no gravity. The rest pose is the equilibrium, held by soft springs
+// back to it, so the mark always finds its way home. Silk means stiff along
+// the weave, loose in shear, almost no bend resistance.
+// ===========================================================================
+
+const SILK = {
+  substeps: 2, iterations: 6, damping: 0.982,
+  structural: 1.0, shear: 0.55, bend: 0.05,
+  springApex: 0.42, springHem: 0.035,          // pull back toward the rest pose
+  wind: 0.055, windScale: 2.1, windSpeed: 0.55,
+};
+
+class Cloth {
+  constructor(mesh, tuning) {
+    this.m = mesh; this.t = tuning;
+    this.pos  = Float32Array.from(mesh.rest);
+    this.prev = Float32Array.from(mesh.rest);
+    this.rest = mesh.rest;
+    this.force = new Float32Array(mesh.count*3);
+    this.spring = new Float32Array(mesh.count);
+    for (let i=0;i<mesh.count;i++) {
+      const a = mesh.anchor[i];
+      this.spring[i] = tuning.springHem + (tuning.springApex-tuning.springHem)*a;
+    }
+    this.#constraints();
+    this.grabbed = -1;
+  }
+
+  #constraints() {
+    const { nu, nv, nw, nuFold, bodyIdx, foldIdx } = this.m;
+    const a=[], b=[], st=[];
+    const link = (p,q,s) => { if (p!==q) { a.push(p); b.push(q); st.push(s); } };
+    const T = this.t;
+    for (let j=0;j<=nv;j++) for (let i=0;i<=nu;i++) {
+      const n = bodyIdx(i,j);
+      if (i<nu) link(n, bodyIdx(i+1,j), T.structural);
+      if (j<nv) link(n, bodyIdx(i,j+1), T.structural);
+      if (i<nu && j<nv) { link(n, bodyIdx(i+1,j+1), T.shear); link(bodyIdx(i+1,j), bodyIdx(i,j+1), T.shear); }
+      if (i<nu-1) link(n, bodyIdx(i+2,j), T.bend);
+      if (j<nv-1) link(n, bodyIdx(i,j+2), T.bend);
+    }
+    for (let w=0;w<=nw;w++) for (let i=0;i<=nuFold;i++) {
+      const n = foldIdx(i,w);
+      if (i<nuFold && w>0) link(n, foldIdx(i+1,w), T.structural);   // w=0 row belongs to the body
+      if (w<nw) link(n, foldIdx(i,w+1), T.structural);
+      if (i<nuFold && w<nw) { link(n, foldIdx(i+1,w+1), T.shear); link(foldIdx(i+1,w), foldIdx(i,w+1), T.shear); }
+      if (w<nw-1) link(n, foldIdx(i,w+2), T.bend);
+    }
+    this.ca = Int32Array.from(a); this.cb = Int32Array.from(b); this.cs = Float32Array.from(st);
+    this.cl = new Float32Array(a.length);
+    const R = this.rest;
+    for (let c=0;c<a.length;c++) {
+      const p=a[c]*3, q=b[c]*3;
+      this.cl[c] = Math.hypot(R[p]-R[q], R[p+1]-R[q+1], R[p+2]-R[q+2]);
+    }
+  }
+
+  addForce(i, fx, fy, fz) { const n=i*3; this.force[n]+=fx; this.force[n+1]+=fy; this.force[n+2]+=fz; }
+
+  step(dt) {
+    const T=this.t, sub=T.substeps, h=dt/sub, h2=h*h;
+    for (let s=0;s<sub;s++) {
+      const { pos, prev, force, rest, spring } = this;
+      for (let i=0;i<this.m.count;i++) {
+        if (i===this.grabbed) continue;
+        const n=i*3;
+        for (let k=0;k<3;k++) {
+          const cur=pos[n+k];
+          let next = cur + (cur-prev[n+k])*T.damping + force[n+k]*h2;
+          next += (rest[n+k]-next)*spring[i];          // find the way home
+          prev[n+k]=cur; pos[n+k]=next;
+        }
+      }
+      for (let it=0; it<T.iterations; it++) this.#solve();
+    }
+    this.force.fill(0);
+  }
+
+  #solve() {
+    const { pos, ca, cb, cs, cl } = this;
+    for (let c=0;c<ca.length;c++) {
+      const p=ca[c]*3, q=cb[c]*3;
+      const dx=pos[q]-pos[p], dy=pos[q+1]-pos[p+1], dz=pos[q+2]-pos[p+2];
+      const d=Math.sqrt(dx*dx+dy*dy+dz*dz);
+      if (d<1e-7) continue;
+      const w = ((d-cl[c])/d) * cs[c] * 0.5;
+      const ox=dx*w, oy=dy*w, oz=dz*w;
+      if (ca[c]!==this.grabbed) { pos[p]+=ox; pos[p+1]+=oy; pos[p+2]+=oz; }
+      if (cb[c]!==this.grabbed) { pos[q]-=ox; pos[q+1]-=oy; pos[q+2]-=oz; }
+    }
+  }
+
+  // Mean distance from rest, which is what the shading ramp listens to.
+  energy() {
+    let acc=0;
+    for (let i=0;i<this.m.count;i++) {
+      const n=i*3;
+      acc += Math.abs(this.pos[n]-this.rest[n]) + Math.abs(this.pos[n+1]-this.rest[n+1])
+           + Math.abs(this.pos[n+2]-this.rest[n+2]);
+    }
+    return acc/this.m.count;
+  }
+}
+
+// ===========================================================================
+// 3 · Scene
+// ===========================================================================
+
+const PALETTE = { front:'#FF6625', back:'#D0470C', shadow:'#8E2E00', hilite:'#FFE9E0', page:'#FBF8EF' };
+
+const canvas = document.getElementById('stage');
+let renderer;
+try {
+  renderer = new THREE.WebGLRenderer({ canvas, antialias:true });
+} catch (err) {
+  // No WebGL: fall back to the flat mark rather than an empty page.
+  canvas.style.display = 'none';
+  document.getElementById('hint').style.display = 'none';
+  document.getElementById('fallback').style.display = 'block';
+  throw err;
+}
+renderer.setClearColor(new THREE.Color(PALETTE.page), 1);
+
+const scene = new THREE.Scene();
+const camera = new THREE.OrthographicCamera(-1,1,1,-1,0.01,100);
+camera.position.set(0,0,10);
+
+const mesh = buildRestMesh(56, 38, 12, KNOBS);
+const cloth = new Cloth(mesh, SILK);
+
+const geometry = new THREE.BufferGeometry();
+geometry.setAttribute('position', new THREE.BufferAttribute(cloth.pos, 3));
+geometry.setAttribute('uv', new THREE.BufferAttribute(mesh.uvs, 2));
+geometry.setIndex(new THREE.BufferAttribute(mesh.indices, 1));
+geometry.computeVertexNormals();
+
+// At rest the shading fades out completely and the mark is the flat logo.
+// It only becomes three-dimensional while it is alive.
+const material = new THREE.ShaderMaterial({
+  side: THREE.DoubleSide,
+  uniforms: {
+    uFront:  { value: new THREE.Color(PALETTE.front) },
+    uBack:   { value: new THREE.Color(PALETTE.back) },
+    uShadow: { value: new THREE.Color(PALETTE.shadow) },
+    uHilite: { value: new THREE.Color(PALETTE.hilite) },
+    uShade:  { value: 0 },
+    uLight:  { value: new THREE.Vector3(-0.35, 0.72, 0.62).normalize() },
+  },
+  vertexShader: `
+    varying vec3 vNormal; varying vec3 vView;
+    void main() {
+      vNormal = normalMatrix * normal;
+      vec4 mv = modelViewMatrix * vec4(position, 1.0);
+      vView = -mv.xyz;
+      gl_Position = projectionMatrix * mv;
+    }`,
+  fragmentShader: `
+    uniform vec3 uFront, uBack, uShadow, uHilite, uLight;
+    uniform float uShade;
+    varying vec3 vNormal; varying vec3 vView;
+    void main() {
+      vec3 N = normalize(vNormal);
+      if (!gl_FrontFacing) N = -N;
+      vec3 base = gl_FrontFacing ? uFront : uBack;
+      vec3 V = normalize(vView);
+      vec3 H = normalize(uLight + V);
+      float wrap = clamp((dot(N, uLight) + 0.55) / 1.55, 0.0, 1.0);
+      float sheen = pow(max(dot(N, H), 0.0), 34.0) * 0.60;
+      float rim   = pow(1.0 - max(dot(N, V), 0.0), 3.0) * 0.30;
+      vec3 lit = mix(mix(base, uShadow, 0.62), base, wrap) + uHilite * (sheen + rim);
+      gl_FragColor = vec4(mix(base, lit, uShade), 1.0);
+      #include <colorspace_fragment>
+    }`,
+});
+
+const cloak = new THREE.Mesh(geometry, material);
+scene.add(cloak);
+
+// ===========================================================================
+// 4 · Levitation, pointer, loop
+// ===========================================================================
+
+const noise = (x,y,t) =>
+    Math.sin(x*1.7 + t*0.9) * Math.cos(y*2.3 - t*0.7)
+  + 0.5 * Math.sin(x*3.1 - y*2.7 + t*1.31)
+  + 0.25 * Math.cos(x*5.3 + y*4.1 - t*1.9);
+
+const pointer = new THREE.Vector2(0,0);
+const world   = new THREE.Vector3();
+const ray     = new THREE.Raycaster();
+const plane   = new THREE.Plane(new THREE.Vector3(0,0,1), 0);
+let pointerIn=false, dragging=false, shade=0, interacted=false;
+let floatPos = new THREE.Vector3(), floatPrev = new THREE.Vector3(), floatVel = new THREE.Vector3();
+
+function resize() {
+  const w = Math.min(window.innerWidth, 1400), h = Math.min(window.innerHeight, 1000);
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+  renderer.setSize(w, h, true);
+  const fit = 1.28, aspect = w/h;
+  const hw = aspect > VIEW.hw/VIEW.hh ? VIEW.hh*fit*aspect : VIEW.hw*fit;
+  const hh = aspect > VIEW.hw/VIEW.hh ? VIEW.hh*fit : VIEW.hw*fit/aspect;
+  camera.left=-hw; camera.right=hw; camera.top=hh; camera.bottom=-hh;
+  camera.updateProjectionMatrix();
+}
+addEventListener('resize', resize); resize();
+
+function toWorldPoint(ev) {
+  const r = canvas.getBoundingClientRect();
+  pointer.x = ((ev.clientX-r.left)/r.width)*2-1;
+  pointer.y = -((ev.clientY-r.top)/r.height)*2+1;
+  ray.setFromCamera(pointer, camera);
+  ray.ray.intersectPlane(plane, world);
+}
+
+canvas.addEventListener('pointermove', (ev) => { pointerIn=true; toWorldPoint(ev); });
+canvas.addEventListener('pointerleave', () => { pointerIn=false; });
+canvas.addEventListener('pointerdown', (ev) => {
+  canvas.setPointerCapture(ev.pointerId); toWorldPoint(ev);
+  let best=-1, bestD=0.16;
+  for (let i=0;i<mesh.count;i++) {
+    if (mesh.anchor[i] > 0.5) continue;                       // the apex stays put
+    const n=i*3;
+    const d = Math.hypot(cloth.pos[n]-world.x, cloth.pos[n+1]-world.y);
+    if (d < bestD) { bestD=d; best=i; }
+  }
+  if (best >= 0) { cloth.grabbed=best; dragging=true; canvas.classList.add('grabbing'); }
+  interacted = true; document.getElementById('hint').classList.add('gone');
+});
+const release = () => { cloth.grabbed=-1; dragging=false; canvas.classList.remove('grabbing'); };
+canvas.addEventListener('pointerup', release);
+canvas.addEventListener('pointercancel', release);
+
+const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+let last = performance.now(), frozen = false, lastFrameMs = 0;
+
+function frame(now) {
+  if (!reduced) requestAnimationFrame(frame);
+  const dt = Math.min((now-last)/1000, 1/30); last = now;
+  if (!frozen) {
+    const t = now/1000;
+
+    if (!reduced) {
+      // Levitation: the whole mark drifts, and the fabric lags behind it.
+      floatPrev.copy(floatPos);
+      floatPos.set(Math.sin(t*0.41)*0.045 + Math.sin(t*0.23)*0.02,
+                   Math.sin(t*0.57)*0.038 + Math.cos(t*0.31)*0.016, 0);
+      floatVel.subVectors(floatPos, floatPrev);
+      cloak.position.copy(floatPos);
+
+      // Wind, held off the apex so the cloak hangs rather than flaps.
+      const { rest, force } = cloth;
+      const W = SILK.wind, S = SILK.windScale, sp = t*SILK.windSpeed;
+      for (let i=0;i<mesh.count;i++) {
+        const n=i*3, free = 1 - mesh.anchor[i];
+        const x=rest[n]*S, y=rest[n+1]*S;
+        force[n]   += noise(x, y, sp) * W * free * 0.6;
+        force[n+1] += noise(x+11.3, y-4.7, sp*0.9) * W * free * 0.5;
+        force[n+2] += noise(x-7.1, y+9.2, sp*1.1) * W * free;
+        force[n]   -= floatVel.x * 260 * free;      // inertia of the drift
+        force[n+1] -= floatVel.y * 260 * free;
+      }
+    }
+
+    if (dragging && cloth.grabbed >= 0) {
+      const n = cloth.grabbed*3;
+      cloth.pos[n]   = world.x - cloak.position.x;
+      cloth.pos[n+1] = world.y - cloak.position.y;
+      cloth.pos[n+2] = Math.max(cloth.rest[n+2], 0.25);
+    } else if (pointerIn && !reduced) {
+      // Hovering pushes the silk out of the way.
+      for (let i=0;i<mesh.count;i++) {
+        const n=i*3, free = 1 - mesh.anchor[i];
+        const dx = cloth.pos[n]+cloak.position.x - world.x, dy = cloth.pos[n+1]+cloak.position.y - world.y;
+        const d2 = dx*dx + dy*dy;
+        if (d2 < 0.09) {
+          const f = (1 - d2/0.09) * 3.2 * free;
+          cloth.addForce(i, dx*f, dy*f, f*0.9);
+        }
+      }
+    }
+
+    cloth.step(dt);
+    geometry.computeVertexNormals();
+    geometry.attributes.position.needsUpdate = true;
+    geometry.attributes.normal.needsUpdate = true;
+
+    // Lighting fades in with movement, so the mark is flat when it settles.
+    const target = Math.min(cloth.energy() / 0.030, 1);
+    shade += (target - shade) * (target > shade ? 0.16 : 0.05);
+    material.uniforms.uShade.value = shade;
+  }
+  renderer.render(scene, camera);
+  lastFrameMs = performance.now() - now;
+}
+if (reduced) {
+  // Honour the preference literally: draw the mark once, at rest, and stop.
+  geometry.attributes.position.needsUpdate = true;
+  renderer.render(scene, camera);
+} else {
+  requestAnimationFrame(frame);
+}
+
+// Hooks for the projection test: freeze at the exact rest pose and set the
+// camera to the artwork's own viewBox, so a screenshot can be diffed against
+// the original SVG pixel for pixel.
+window.__cloak = {
+  // keepState renders whatever the cloth has settled into, rather than
+  // snapping it back, so "does it return on its own" is actually measurable.
+  testView(px, py, keepState) {
+    frozen = true;
+    cloak.position.set(0,0,0);
+    if (!keepState) { cloth.pos.set(cloth.rest); cloth.prev.set(cloth.rest); }
+    geometry.attributes.position.needsUpdate = true;
+    geometry.computeVertexNormals();
+    material.uniforms.uShade.value = 0;
+    renderer.setPixelRatio(1); renderer.setSize(px, py, true);
+    camera.left=-VIEW.hw; camera.right=VIEW.hw; camera.top=VIEW.hh; camera.bottom=-VIEW.hh;
+    camera.updateProjectionMatrix();
+    renderer.render(scene, camera);
+  },
+  spin(angle) {
+    cloak.rotation.y = angle;
+    material.uniforms.uShade.value = 1;
+    renderer.render(scene, camera);
+  },
+  // Displace the cloth by hand so its settling can be measured.
+  poke(strength = 1) {
+    frozen = false;
+    for (let i=0;i<mesh.count;i++) {
+      const n=i*3, free = 1 - mesh.anchor[i];
+      cloth.pos[n]   += 0.55*strength*free;
+      cloth.pos[n+1] += 0.30*strength*free*Math.sin(mesh.uvs[i*2]*6.0);
+      cloth.pos[n+2] += 0.45*strength*free;
+    }
+  },
+  energy: () => cloth.energy(),
+  frameMs: () => lastFrameMs,
+  setKnobs(next) {
+    Object.assign(KNOBS, next);
+    const m = buildRestMesh(mesh.nu, mesh.nv, mesh.nw, KNOBS);
+    mesh.rest.set(m.rest); cloth.rest = mesh.rest;
+    cloth.pos.set(m.rest); cloth.prev.set(m.rest);
+    geometry.attributes.position.needsUpdate = true;
+    geometry.computeVertexNormals();
+  },
+  knobs: KNOBS, stats: { verts: mesh.count, tris: mesh.indices.length/3 },
+};
+if (!reduced) setTimeout(() => { if (!interacted) document.getElementById('hint').classList.add('gone'); }, 9000);
+</script>
