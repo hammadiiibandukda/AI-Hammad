@@ -18,7 +18,7 @@ await p.route('https://cdn.jsdelivr.net/**', r=>r.fulfill({contentType:'text/jav
 await p.goto('file://'+path.join(HERE,'cloak.html'));
 await p.waitForFunction('window.__cloak!==undefined',null,{timeout:20000});
 if (knobs) await p.evaluate(k=>window.__cloak.setKnobs(k), knobs);
-await p.evaluate(([w,h])=>window.__cloak.testView(w,h),[W,H]);
+await p.evaluate(([w,h])=>window.__cloak.homeView(w,h),[W,H]);
 const shot = (await p.screenshot({clip:{x:0,y:0,width:W,height:H}})).toString('base64');
 
 const o = await ctx.newPage();

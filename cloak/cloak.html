@@ -3,44 +3,51 @@
 <title>Cloaked — living mark</title>
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <style>
-  :root { --cream:#FBF8EF; --ink:#130F02; --muted:#A09C8F; }
-  html,body { height:100%; margin:0; background:var(--cream); overscroll-behavior:none; }
-  body { display:grid; place-items:center; font:400 13px/1.5 ui-sans-serif,system-ui,sans-serif;
-         color:var(--muted); -webkit-font-smoothing:antialiased; }
+  :root { --page:#FBF8EF; --ink:#130F02; --muted:#A09C8F; }
+  html,body { height:100%; margin:0; background:var(--page); overscroll-behavior:none; }
+  body { display:grid; place-items:center; color:var(--muted); overflow:hidden;
+         font:400 12px/1.5 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+         -webkit-font-smoothing:antialiased; }
   canvas { display:block; touch-action:none; cursor:grab; }
   canvas.grabbing { cursor:grabbing; }
-  #hint { position:fixed; left:0; right:0; bottom:26px; text-align:center; letter-spacing:.02em;
-          pointer-events:none; transition:opacity .6s ease; }
+  #hint { position:fixed; inset:auto 16px 22px; text-align:center; letter-spacing:.07em;
+          pointer-events:none; transition:opacity .8s ease; }
   #hint.gone { opacity:0; }
   #fallback { display:none; }
   @media (prefers-reduced-motion: reduce) { #hint { display:none; } }
 </style>
 
 <canvas id="stage"></canvas>
-<div id="hint">drag it · flick it · let go</div>
+<div id="hint">drag the silk &nbsp;·&nbsp; orbit the empty space &nbsp;·&nbsp; right-drag to pan &nbsp;·&nbsp; double-click to reset</div>
 <svg id="fallback" width="420" height="284" viewBox="72.2972 91.7177 84.8388 57.2823" aria-label="Cloaked">
   <path d="M97.2728 149C97.2728 149 72.2972 140.278 77.789 131.071C81.2884 125.256 89.2806 131.555 101.766 137.854L97.2671 149H97.2728Z" fill="#D0470C"/>
   <path d="M127.746 146.09C146.728 147.541 155.137 139.361 157.136 136.943C157.136 136.943 145.802 123.19 139.125 113.962C134.576 107.679 128.751 98.7473 125.415 93.5611C124.23 91.7177 121.397 91.793 120.189 93.6256C107.794 112.371 84.9689 126.425 79.8496 129.134C83.8965 127.532 91.2791 132.525 101.275 137.856C101.275 137.856 108.697 141.532 113.726 143.236C120.172 145.418 127.752 146.095 127.752 146.095L127.746 146.09Z" fill="#FF6625"/>
 </svg>
 
 <script type="importmap">
-{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.186.0/build/three.module.js" } }
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.186.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.186.0/examples/jsm/"
+} }
 </script>
 
 <script type="module">
 import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 
 // ===========================================================================
 // 1 · The mark, as geometry
 //
 // The Cloaked mark is a drawing of a draped cloth: an apex it hangs from, two
 // edges sweeping down to a left and a right tip, a hem between them, and the
-// bottom-left corner curled backwards so the reverse of the fabric shows. The
-// dark fill is not a second colour, it is the back face.
+// bottom-left corner folded backwards. The dark fill in the artwork is the
+// inside of that fold — the same silk, in shadow — so there is one fabric and
+// one colour here, and the darkness comes from the lighting.
 //
-// So the rest pose is built to project back onto the artwork exactly: the
-// surface is a Coons patch over the four real boundary curves, and all depth
-// is added in Z, which cannot move the silhouette.
+// The rest pose is built to project back onto the artwork: the surface is a
+// Coons patch over the four real boundary curves, and depth is added in Z,
+// which cannot move the silhouette.
 // ===========================================================================
 
 const SEG = {
@@ -112,6 +119,7 @@ const KNOBS = {
   curlEase: 1.2788,      // how sharply the crease turns over
   curlOpen: 0.4943,      // how far the reversed flap reaches past the near side
   curlLift: 0.954, curlAxis: -1.768,
+  backDepth: 0.92,     // how far the hidden back of the cone swells behind
 };
 
 const clamp01 = x => x<0?0:x>1?1:x;
@@ -120,14 +128,23 @@ const cross=(a,b)=>[a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0
 const dot=(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
 const norm=(a)=>{const l=Math.hypot(a[0],a[1],a[2])||1; return [a[0]/l,a[1]/l,a[2]/l];};
 
-function draped(u,v,k) {
+// The mark is a veil thrown over something: a hollow cone, pinched at the apex
+// and open at the hem. Depth splits into the cone's centre line, which both
+// halves share, and a bulge that swells the front toward the camera and the
+// back away from it. The bulge vanishes at u=0 and u=1, so the two halves meet
+// exactly along the silhouette and close the cone without a seam.
+function conePoint(u,v,k) {
   const [x,y] = toWorld(coons(u,v));
   const across = Math.pow(Math.sin(Math.PI*clamp01(u)), k.bulgePow);
   const down = Math.pow(clamp01(v), k.fallPow);
-  let z = k.depth*across*down;
-  z -= k.leftBack * Math.pow(1-clamp01(u), k.leftPow) * down;   // left wing turns away
-  z += k.apexPush * Math.pow(1-clamp01(v), 3);
-  return [x,y,z];
+  const axis = -k.leftBack*Math.pow(1-clamp01(u), k.leftPow)*down
+             + k.apexPush*Math.pow(1-clamp01(v), 3);
+  return { x, y, axis, bulge: k.depth*across*down };
+}
+
+function draped(u,v,k,back) {
+  const { x, y, axis, bulge } = conePoint(u,v,k);
+  return [x, y, axis + (back ? -bulge*k.backDepth : bulge)];
 }
 
 // Fabric continuing past the crease, rolling backwards. Past a right angle it
@@ -182,172 +199,337 @@ function foldPoint(u,w,k) {
 
 function buildRestMesh(nu, nv, nw, k) {
   const nuFold = Math.max(2, Math.round(U_HINGE*nu));
-  const bodyCount = (nu+1)*(nv+1);
-  const count = bodyCount + (nuFold+1)*nw;
+  // The artwork's apex is a rounded cap barely a hundredth of the mark wide.
+  // Spread across the grid it becomes a row of near-coincident points, which
+  // is badly conditioned for the solver and makes the top shiver. Welding it
+  // into one real apex costs a fraction of a pixel and steadies everything.
+  const APEX = 0;
+  const frontCount = 1 + nv*(nu+1);
+  const backCount = nv*(nu-1);
+  const foldStart = frontCount + backCount;
+  const count = foldStart + (nuFold+1)*nw;
   const rest = new Float32Array(count*3), uvs = new Float32Array(count*2);
-  const bodyIdx = (i,j) => j*(nu+1)+i;
-  const foldIdx = (i,w) => w===0 ? bodyIdx(i,nv) : bodyCount + (w-1)*(nuFold+1) + i;
 
-  for (let j=0;j<=nv;j++) for (let i=0;i<=nu;i++) {
-    const n=bodyIdx(i,j), p=draped(i/nu, j/nv, k);
-    rest[n*3]=p[0]; rest[n*3+1]=p[1]; rest[n*3+2]=p[2];
-    uvs[n*2]=i/nu; uvs[n*2+1]=1-j/nv;
-  }
-  for (let w=1;w<=nw;w++) for (let i=0;i<=nuFold;i++) {
-    const n=foldIdx(i,w), p=foldPoint(i/nu, w/nw, k);
-    rest[n*3]=p[0]; rest[n*3+1]=p[1]; rest[n*3+2]=p[2];
-    uvs[n*2]=i/nu; uvs[n*2+1]=-w/nw;
-  }
+  const frontIdx = (i,j) => j===0 ? APEX : 1 + (j-1)*(nu+1) + i;
+  const backIdx  = (i,j) => (j===0) ? APEX
+                          : (i===0 || i===nu) ? frontIdx(i,j)
+                          : frontCount + (j-1)*(nu-1) + (i-1);
+  const foldIdx  = (i,w) => w===0 ? frontIdx(i,nv) : foldStart + (w-1)*(nuFold+1) + i;
+
+  const put = (n,p,u,vv) => { rest[n*3]=p[0]; rest[n*3+1]=p[1]; rest[n*3+2]=p[2];
+                              uvs[n*2]=u; uvs[n*2+1]=vv; };
+  put(APEX, draped(0.5, 0, k, false), 0.5, 1);
+  for (let j=1;j<=nv;j++) for (let i=0;i<=nu;i++)
+    put(frontIdx(i,j), draped(i/nu, j/nv, k, false), i/nu, 1-j/nv);
+  for (let j=1;j<=nv;j++) for (let i=1;i<nu;i++)
+    put(backIdx(i,j), draped(i/nu, j/nv, k, true), i/nu, 1-j/nv);
+  for (let w=1;w<=nw;w++) for (let i=0;i<=nuFold;i++)
+    put(foldIdx(i,w), foldPoint(i/nu, w/nw, k), i/nu, -w/nw);
 
   const tris=[];
   for (let j=0;j<nv;j++) for (let i=0;i<nu;i++) {
-    const a=bodyIdx(i,j), b=bodyIdx(i+1,j), c=bodyIdx(i+1,j+1), d=bodyIdx(i,j+1);
-    tris.push(a,d,c, a,c,b);
+    const a=frontIdx(i,j), b=frontIdx(i+1,j), c=frontIdx(i+1,j+1), d=frontIdx(i,j+1);
+    const e=backIdx(i,j), f=backIdx(i+1,j), g=backIdx(i+1,j+1), h=backIdx(i,j+1);
+    if (j===0) { tris.push(a,d,c); tris.push(e,g,h); }      // fan into the apex
+    else { tris.push(a,d,c, a,c,b); tris.push(e,g,h, e,f,g); }
   }
   for (let w=0;w<nw;w++) for (let i=0;i<nuFold;i++) {
     const a=foldIdx(i,w), b=foldIdx(i+1,w), c=foldIdx(i+1,w+1), d=foldIdx(i,w+1);
     tris.push(a,d,c, a,c,b);
   }
 
-  // v=0 is the apex the cloak hangs from; the hold falls off fast below it.
+  // v=0 is the apex the veil hangs from; the hold falls off fast below it.
   const anchor = new Float32Array(count);
-  for (let j=0;j<=nv;j++) { const hold=Math.pow(1-j/nv,5); for (let i=0;i<=nu;i++) anchor[bodyIdx(i,j)]=hold; }
+  anchor[APEX] = 1;
+  for (let j=1;j<=nv;j++) { const hold=Math.pow(1-j/nv,5);
+    for (let i=0;i<=nu;i++) { anchor[frontIdx(i,j)]=hold; anchor[backIdx(i,j)]=hold; } }
 
-  return { rest, uvs, anchor, nu, nv, nw, nuFold, bodyCount, count,
-           indices: new Uint32Array(tris), bodyIdx, foldIdx };
+  return { rest, uvs, anchor, nu, nv, nw, nuFold, frontCount, backCount, foldStart, count,
+           indices: new Uint32Array(tris), frontIdx, backIdx, foldIdx };
 }
 
 // ===========================================================================
-// 2 · Cloth solver — Verlet with distance constraints, tuned for silk
+// 2 · Cloth solver — substepped XPBD with self-collision
 //
-// There is no gravity. The rest pose is the equilibrium, held by soft springs
-// back to it, so the mark always finds its way home. Silk means stiff along
-// the weave, loose in shear, almost no bend resistance.
+// XPBD with many small substeps and one solve each, which is far steadier than
+// iterating a big step and gives stiffness that doesn't drift with resolution.
+//
+// There is no gravity. Home is a critically damped spring back to the rest
+// pose, so releasing the silk eases it back rather than snapping it, and the
+// whole sheet is free to be flown around in the meantime.
 // ===========================================================================
 
 const SILK = {
-  substeps: 2, iterations: 6, damping: 0.982,
-  structural: 1.0, shear: 0.55, bend: 0.05,
-  springApex: 0.42, springHem: 0.035,          // pull back toward the rest pose
-  wind: 0.055, windScale: 2.1, windSpeed: 0.55,
+  substeps: 6,
+  stretch: 2.0e-8,      // XPBD compliance: near zero, silk barely stretches
+  shear:   6.0e-7,
+  bend:    3.2e-5,      // enough spring to shake creases out instead of keeping them
+  hoop:    4.0e-6,      // keeps the cone's mouth open instead of letting it flatten
+  thickness: 0.040,     // fabric depth used for self-collision
+  drag: 0.06,           // air resistance
+  springHome: 58.0,     // stiffness of the pull back to the rest pose
+  springHeld: 4.5,      // ... relaxed while a corner is being flown
+  damping: 1.02,        // ×critical, so it settles without overshooting twice
+  wind: 0.30, windScale: 2.1, windSpeed: 0.55,
 };
 
 class Cloth {
   constructor(mesh, tuning) {
-    this.m = mesh; this.t = tuning;
+    this.m = mesh; this.t = tuning; this.n = mesh.count;
     this.pos  = Float32Array.from(mesh.rest);
     this.prev = Float32Array.from(mesh.rest);
+    this.vel  = new Float32Array(this.n*3);
+    this.force = new Float32Array(this.n*3);
     this.rest = mesh.rest;
-    this.force = new Float32Array(mesh.count*3);
-    this.spring = new Float32Array(mesh.count);
-    for (let i=0;i<mesh.count;i++) {
-      const a = mesh.anchor[i];
-      this.spring[i] = tuning.springHem + (tuning.springApex-tuning.springHem)*a;
-    }
+    this.held = new Float32Array(this.n);      // per-particle grab weight
+    // The apex is pinched and the fold is tightly rolled: both are fine,
+    // highly curved geometry that the wind would otherwise shake apart, so
+    // they hold their shape harder than the open body of the veil does.
+    this.kScale = new Float32Array(this.n);
+    for (let i=0;i<this.n;i++)
+      this.kScale[i] = 1 + 2.0*mesh.anchor[i] + (i >= mesh.foldStart ? 1.4 : 0);
     this.#constraints();
-    this.grabbed = -1;
+    this.#collisionBuffers();
+    this.homeScale = 1;
   }
 
   #constraints() {
-    const { nu, nv, nw, nuFold, bodyIdx, foldIdx } = this.m;
-    const a=[], b=[], st=[];
-    const link = (p,q,s) => { if (p!==q) { a.push(p); b.push(q); st.push(s); } };
+    const { nu, nv, nw, nuFold, frontIdx, backIdx, foldIdx } = this.m;
+    const a=[], b=[], comp=[];
     const T = this.t;
-    for (let j=0;j<=nv;j++) for (let i=0;i<=nu;i++) {
-      const n = bodyIdx(i,j);
-      if (i<nu) link(n, bodyIdx(i+1,j), T.structural);
-      if (j<nv) link(n, bodyIdx(i,j+1), T.structural);
-      if (i<nu && j<nv) { link(n, bodyIdx(i+1,j+1), T.shear); link(bodyIdx(i+1,j), bodyIdx(i,j+1), T.shear); }
-      if (i<nu-1) link(n, bodyIdx(i+2,j), T.bend);
-      if (j<nv-1) link(n, bodyIdx(i,j+2), T.bend);
+    const link = (p,q,c) => { if (p!==q) { a.push(p); b.push(q); comp.push(c); } };
+    for (const side of [frontIdx, backIdx]) {
+      for (let j=0;j<=nv;j++) for (let i=0;i<=nu;i++) {
+        const n = side(i,j);
+        if (i<nu) link(n, side(i+1,j), T.stretch);
+        if (j<nv) link(n, side(i,j+1), T.stretch);
+        if (i<nu && j<nv) { link(n, side(i+1,j+1), T.shear); link(side(i+1,j), side(i,j+1), T.shear); }
+        if (i<nu-1) link(n, side(i+2,j), T.bend);
+        if (j<nv-1) link(n, side(i,j+2), T.bend);
+      }
     }
+    // Hold the cone open: the hem loop resists collapsing front onto back.
+    for (let i=1;i<nu;i++) link(frontIdx(i,nv), backIdx(i,nv), T.hoop);
     for (let w=0;w<=nw;w++) for (let i=0;i<=nuFold;i++) {
       const n = foldIdx(i,w);
-      if (i<nuFold && w>0) link(n, foldIdx(i+1,w), T.structural);   // w=0 row belongs to the body
-      if (w<nw) link(n, foldIdx(i,w+1), T.structural);
+      if (i<nuFold && w>0) link(n, foldIdx(i+1,w), T.stretch);   // w=0 belongs to the hem
+      if (w<nw) link(n, foldIdx(i,w+1), T.stretch);
       if (i<nuFold && w<nw) { link(n, foldIdx(i+1,w+1), T.shear); link(foldIdx(i+1,w), foldIdx(i,w+1), T.shear); }
       if (w<nw-1) link(n, foldIdx(i,w+2), T.bend);
     }
-    this.ca = Int32Array.from(a); this.cb = Int32Array.from(b); this.cs = Float32Array.from(st);
+    this.ca = Int32Array.from(a); this.cb = Int32Array.from(b);
+    this.cc = Float32Array.from(comp);
     this.cl = new Float32Array(a.length);
+    this.lambda = new Float32Array(a.length);
     const R = this.rest;
+    let total = 0;
     for (let c=0;c<a.length;c++) {
       const p=a[c]*3, q=b[c]*3;
       this.cl[c] = Math.hypot(R[p]-R[q], R[p+1]-R[q+1], R[p+2]-R[q+2]);
+      if (this.cc[c] === this.t.stretch) total += this.cl[c];
+    }
+    this.spacing = total / Math.max(1, a.length);
+  }
+
+  // ---- self-collision -----------------------------------------------------
+  // A counting-sort spatial hash, rebuilt once a frame; the pairs it finds are
+  // then pushed apart on every substep. Each pair carries its own minimum
+  // separation: particles that already sit close together in the rest pose
+  // keep that spacing as the floor, everything else gets full fabric
+  // thickness. That way the fold can lie against the body without the solver
+  // treating its own rest shape as a collision.
+  #collisionBuffers() {
+    this.cellSize = this.t.thickness;      // one cell per search radius: 27 cells covers it
+    this.tableSize = 1 << 15;   // sparse enough that unrelated cells rarely share a bucket
+    this.cellStart = new Int32Array(this.tableSize + 1);
+    this.cursor = new Int32Array(this.tableSize);
+    this.entries = new Int32Array(this.n);
+    this.keys = new Int32Array(this.n);
+    this.maxPairs = 60000;
+    this.pa = new Int32Array(this.maxPairs);
+    this.pb = new Int32Array(this.maxPairs);
+    this.psep = new Float32Array(this.maxPairs);
+    this.pairCount = 0;
+  }
+
+  #hashKey(x,y,z) {
+    return (((x * 92837111) ^ (y * 689287499) ^ (z * 283923481)) >>> 0) % this.tableSize;
+  }
+
+  buildPairs() {
+    const { pos, rest, n, cellStart, cursor, entries, keys, tableSize } = this;
+    const inv = 1/this.cellSize, thick = this.t.thickness;
+    cellStart.fill(0);
+    for (let i=0;i<n;i++) {
+      const k = this.#hashKey(Math.floor(pos[i*3]*inv), Math.floor(pos[i*3+1]*inv), Math.floor(pos[i*3+2]*inv));
+      keys[i] = k; cellStart[k]++;
+    }
+    let run = 0;
+    for (let c=0;c<tableSize;c++) { const t = cellStart[c]; cellStart[c] = run; run += t; }
+    cellStart[tableSize] = run;
+    cursor.set(cellStart.subarray(0, tableSize));
+    for (let i=0;i<n;i++) entries[cursor[keys[i]]++] = i;
+
+    let count = 0;
+    const broad = thick, broad2 = broad*broad;
+    const neighbour2 = (thick*2.2)*(thick*2.2);
+    for (let i=0;i<n;i++) {
+      const ix = Math.floor(pos[i*3]*inv), iy = Math.floor(pos[i*3+1]*inv), iz = Math.floor(pos[i*3+2]*inv);
+      for (let dx=-1;dx<=1;dx++) for (let dy=-1;dy<=1;dy++) for (let dz=-1;dz<=1;dz++) {
+        const k = this.#hashKey(ix+dx, iy+dy, iz+dz);
+        for (let e=cellStart[k]; e<cellStart[k+1]; e++) {
+          const j = entries[e];
+          if (j <= i) continue;
+          const p=i*3, q=j*3;
+          const ddx=pos[q]-pos[p], ddy=pos[q+1]-pos[p+1], ddz=pos[q+2]-pos[p+2];
+          const d2 = ddx*ddx+ddy*ddy+ddz*ddz;
+          if (d2 > broad2) continue;
+          const rx=rest[q]-rest[p], ry=rest[q+1]-rest[p+1], rz=rest[q+2]-rest[p+2];
+          // Particles that are near neighbours in the weave are already held
+          // by distance constraints; only genuinely separate pieces of cloth
+          // are collision candidates, which is what keeps this list short.
+          if (rx*rx+ry*ry+rz*rz < neighbour2) continue;
+          const sep = thick;
+          if (d2 > sep*sep) continue;
+          if (count >= this.maxPairs) { this.pairCount = count; return; }
+          this.pa[count]=i; this.pb[count]=j; this.psep[count]=sep; count++;
+        }
+      }
+    }
+    this.pairCount = count;
+  }
+
+  #solveCollisions() {
+    const { pos, pa, pb, psep, pairCount, held } = this;
+    for (let c=0;c<pairCount;c++) {
+      const i=pa[c], j=pb[c], p=i*3, q=j*3, sep=psep[c];
+      let dx=pos[q]-pos[p], dy=pos[q+1]-pos[p+1], dz=pos[q+2]-pos[p+2];
+      let d2 = dx*dx+dy*dy+dz*dz;
+      if (d2 >= sep*sep) continue;
+      let d = Math.sqrt(d2);
+      if (d < 1e-6) { dx = 1e-3; dy = 0; dz = 0; d = 1e-3; }
+      const push = (sep - d) / d * 0.5;
+      const wi = 1 - held[i], wj = 1 - held[j];
+      const sum = wi + wj; if (sum < 1e-5) continue;
+      const si = push * 2 * wi/sum, sj = push * 2 * wj/sum;
+      pos[p] -= dx*si; pos[p+1] -= dy*si; pos[p+2] -= dz*si;
+      pos[q] += dx*sj; pos[q+1] += dy*sj; pos[q+2] += dz*sj;
     }
   }
 
-  addForce(i, fx, fy, fz) { const n=i*3; this.force[n]+=fx; this.force[n+1]+=fy; this.force[n+2]+=fz; }
+  #solveDistance(h2) {
+    const { pos, ca, cb, cc, cl, lambda, held } = this;
+    for (let c=0;c<ca.length;c++) {
+      const i=ca[c], j=cb[c], p=i*3, q=j*3;
+      const dx=pos[q]-pos[p], dy=pos[q+1]-pos[p+1], dz=pos[q+2]-pos[p+2];
+      const d=Math.sqrt(dx*dx+dy*dy+dz*dz);
+      if (d<1e-9) continue;
+      const wi = 1 - held[i], wj = 1 - held[j];
+      const wsum = wi + wj; if (wsum < 1e-5) continue;
+      const alpha = cc[c] / h2;
+      const C = d - cl[c];
+      const dl = (-C - alpha*lambda[c]) / (wsum + alpha);
+      lambda[c] += dl;
+      const s = dl / d;
+      pos[p] -= dx*s*wi; pos[p+1] -= dy*s*wi; pos[p+2] -= dz*s*wi;
+      pos[q] += dx*s*wj; pos[q+1] += dy*s*wj; pos[q+2] += dz*s*wj;
+    }
+  }
 
-  step(dt) {
-    const T=this.t, sub=T.substeps, h=dt/sub, h2=h*h;
+  step(dt, dragging) {
+    if (!(dt > 0)) return;
+    const T = this.t, sub = T.substeps, h = dt/sub, h2 = h*h;
+    const kBase = (dragging ? T.springHeld : T.springHome) * this.homeScale;
+    const { pos, prev, vel, force, rest, held, kScale, n } = this;
     for (let s=0;s<sub;s++) {
-      const { pos, prev, force, rest, spring } = this;
-      for (let i=0;i<this.m.count;i++) {
-        if (i===this.grabbed) continue;
-        const n=i*3;
-        for (let k=0;k<3;k++) {
-          const cur=pos[n+k];
-          let next = cur + (cur-prev[n+k])*T.damping + force[n+k]*h2;
-          next += (rest[n+k]-next)*spring[i];          // find the way home
-          prev[n+k]=cur; pos[n+k]=next;
+      this.lambda.fill(0);          // XPBD multipliers are per-substep
+      for (let i=0;i<n;i++) {
+        const m3=i*3, hold = held[i];
+        const k = kBase * kScale[i];
+        const c = T.damping * 2 * Math.sqrt(k);      // critically damped return
+        for (let a=0;a<3;a++) {
+          const idx = m3+a;
+          // Spring home plus its damper, wind, and a little air resistance.
+          const accel = force[idx]
+            + k*(rest[idx]-pos[idx]) - c*vel[idx] - T.drag*vel[idx]*Math.abs(vel[idx]);
+          vel[idx] += accel*h*(1-hold);
+          prev[idx] = pos[idx];
+          pos[idx] += vel[idx]*h*(1-hold);
         }
       }
-      for (let it=0; it<T.iterations; it++) this.#solve();
+      this.#solveDistance(h2);
+      this.#solveCollisions();
+      for (let i=0;i<n;i++) {
+        const m3=i*3;
+        for (let a=0;a<3;a++) vel[m3+a] = (pos[m3+a]-prev[m3+a])/h;
+      }
     }
     this.force.fill(0);
   }
 
-  #solve() {
-    const { pos, ca, cb, cs, cl } = this;
-    for (let c=0;c<ca.length;c++) {
-      const p=ca[c]*3, q=cb[c]*3;
-      const dx=pos[q]-pos[p], dy=pos[q+1]-pos[p+1], dz=pos[q+2]-pos[p+2];
-      const d=Math.sqrt(dx*dx+dy*dy+dz*dz);
-      if (d<1e-7) continue;
-      const w = ((d-cl[c])/d) * cs[c] * 0.5;
-      const ox=dx*w, oy=dy*w, oz=dz*w;
-      if (ca[c]!==this.grabbed) { pos[p]+=ox; pos[p+1]+=oy; pos[p+2]+=oz; }
-      if (cb[c]!==this.grabbed) { pos[q]-=ox; pos[q+1]-=oy; pos[q+2]-=oz; }
-    }
-  }
+  addForce(i, x, y, z) { const n=i*3; this.force[n]+=x; this.force[n+1]+=y; this.force[n+2]+=z; }
 
-  // Mean distance from rest, which is what the shading ramp listens to.
   energy() {
     let acc=0;
-    for (let i=0;i<this.m.count;i++) {
+    for (let i=0;i<this.n;i++) {
       const n=i*3;
       acc += Math.abs(this.pos[n]-this.rest[n]) + Math.abs(this.pos[n+1]-this.rest[n+1])
            + Math.abs(this.pos[n+2]-this.rest[n+2]);
     }
-    return acc/this.m.count;
+    return acc/this.n;
+  }
+
+  // Worst interpenetration currently present, as a fraction of fabric
+  // thickness. Zero means no two pieces of cloth are inside each other.
+  worstOverlap() {
+    let worst = 0;
+    for (let c=0;c<this.pairCount;c++) {
+      const p=this.pa[c]*3, q=this.pb[c]*3, sep=this.psep[c];
+      const d = Math.hypot(this.pos[q]-this.pos[p], this.pos[q+1]-this.pos[p+1], this.pos[q+2]-this.pos[p+2]);
+      if (d < sep) worst = Math.max(worst, (sep-d)/sep);
+    }
+    return worst;
   }
 }
 
 // ===========================================================================
 // 3 · Scene
+//
+// One fabric, one colour. Everything darker than #FF6625 on screen — including
+// the deep tone inside the fold that the flat artwork draws as #D0470C — is
+// the silk shading itself: the fold turns away from the key light and casts
+// onto its own underside.
 // ===========================================================================
 
-const PALETTE = { front:'#FF6625', back:'#D0470C', shadow:'#8E2E00', hilite:'#FFE9E0', page:'#FBF8EF' };
+const BRAND = { silk:'#FF6625', bounce:'#7A2600', sky:'#FFF3E6', page:'#FBF8EF' };
 
 const canvas = document.getElementById('stage');
 let renderer;
 try {
   renderer = new THREE.WebGLRenderer({ canvas, antialias:true });
 } catch (err) {
-  // No WebGL: fall back to the flat mark rather than an empty page.
-  canvas.style.display = 'none';
-  document.getElementById('hint').style.display = 'none';
-  document.getElementById('fallback').style.display = 'block';
+  canvas.style.display='none';
+  document.getElementById('hint').style.display='none';
+  document.getElementById('fallback').style.display='block';
   throw err;
 }
-renderer.setClearColor(new THREE.Color(PALETTE.page), 1);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.NoToneMapping;   // keep the brand orange exact where fully lit
+
+const pageColor = () =>
+  getComputedStyle(document.documentElement).getPropertyValue('--page').trim() || BRAND.page;
+const applyGround = () => renderer.setClearColor(new THREE.Color(pageColor()), 1);
+applyGround();
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyGround);
+new MutationObserver(applyGround).observe(document.documentElement, { attributeFilter:['data-theme'] });
 
 const scene = new THREE.Scene();
-const camera = new THREE.OrthographicCamera(-1,1,1,-1,0.01,100);
-camera.position.set(0,0,10);
+const pmrem = new THREE.PMREMGenerator(renderer);
+scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+scene.environmentIntensity = 0.21;
 
-const mesh = buildRestMesh(56, 38, 12, KNOBS);
+const mesh = buildRestMesh(46, 30, 9, KNOBS);
 const cloth = new Cloth(mesh, SILK);
 
 const geometry = new THREE.BufferGeometry();
@@ -356,50 +538,179 @@ geometry.setAttribute('uv', new THREE.BufferAttribute(mesh.uvs, 2));
 geometry.setIndex(new THREE.BufferAttribute(mesh.indices, 1));
 geometry.computeVertexNormals();
 
-// At rest the shading fades out completely and the mark is the flat logo.
-// It only becomes three-dimensional while it is alive.
-const material = new THREE.ShaderMaterial({
-  side: THREE.DoubleSide,
-  uniforms: {
-    uFront:  { value: new THREE.Color(PALETTE.front) },
-    uBack:   { value: new THREE.Color(PALETTE.back) },
-    uShadow: { value: new THREE.Color(PALETTE.shadow) },
-    uHilite: { value: new THREE.Color(PALETTE.hilite) },
-    uShade:  { value: 0 },
-    uLight:  { value: new THREE.Vector3(-0.35, 0.72, 0.62).normalize() },
-  },
-  vertexShader: `
-    varying vec3 vNormal; varying vec3 vView;
-    void main() {
-      vNormal = normalMatrix * normal;
-      vec4 mv = modelViewMatrix * vec4(position, 1.0);
-      vView = -mv.xyz;
-      gl_Position = projectionMatrix * mv;
-    }`,
-  fragmentShader: `
-    uniform vec3 uFront, uBack, uShadow, uHilite, uLight;
-    uniform float uShade;
-    varying vec3 vNormal; varying vec3 vView;
-    void main() {
-      vec3 N = normalize(vNormal);
-      if (!gl_FrontFacing) N = -N;
-      vec3 base = gl_FrontFacing ? uFront : uBack;
-      vec3 V = normalize(vView);
-      vec3 H = normalize(uLight + V);
-      float wrap = clamp((dot(N, uLight) + 0.55) / 1.55, 0.0, 1.0);
-      float sheen = pow(max(dot(N, H), 0.0), 34.0) * 0.60;
-      float rim   = pow(1.0 - max(dot(N, V), 0.0), 3.0) * 0.30;
-      vec3 lit = mix(mix(base, uShadow, 0.62), base, wrap) + uHilite * (sheen + rim);
-      gl_FragColor = vec4(mix(base, lit, uShade), 1.0);
-      #include <colorspace_fragment>
-    }`,
+const material = new THREE.MeshPhysicalMaterial({
+  color: new THREE.Color(BRAND.silk),
+  roughness: 0.56, metalness: 0.0,
+  sheen: 1.0, sheenColor: new THREE.Color('#FFCDB4'), sheenRoughness: 0.34,
+  side: THREE.DoubleSide, shadowSide: THREE.DoubleSide,
+  envMapIntensity: 0.5,
 });
 
+// Cavity shading. Every surface facing away from the camera is the inside of
+// the cone, and the inside of a cone is occluded — it sees far less of the
+// room than the outside does. Darkening and warming it there is what turns the
+// flat artwork's #D0470C into something the lighting produces rather than
+// something a second material declares.
+const INTERIOR = { darken: 1.0, tint: new THREE.Color('#C03806'), mix: 0.55 };
+material.onBeforeCompile = (shader) => {
+  shader.uniforms.uInteriorDarken = { value: INTERIOR.darken };
+  shader.uniforms.uInteriorTint = { value: INTERIOR.tint };
+  shader.uniforms.uInteriorMix = { value: INTERIOR.mix };
+  shader.fragmentShader =
+    'uniform float uInteriorDarken;\nuniform vec3 uInteriorTint;\nuniform float uInteriorMix;\n'
+    + shader.fragmentShader.replace('#include <color_fragment>',
+      `#include <color_fragment>
+       if (!gl_FrontFacing) diffuseColor.rgb =
+         mix(diffuseColor.rgb * uInteriorDarken, uInteriorTint, uInteriorMix);`);
+  material.userData.shader = shader;
+};
+
 const cloak = new THREE.Mesh(geometry, material);
+cloak.castShadow = true; cloak.receiveShadow = true;
 scene.add(cloak);
 
+geometry.computeBoundingBox();
+const CENTER = new THREE.Vector3();
+geometry.boundingBox.getCenter(CENTER);
+const FLOOR = geometry.boundingBox.min.y - 0.65;
+
+// Key rakes across the drape from the upper left, which is what drops the
+// inside of the fold into shadow.
+const key = new THREE.DirectionalLight(0xFFF1E4, 2.55);
+key.position.set(-2.4, 3.2, 2.8);
+key.castShadow = true;
+key.shadow.mapSize.set(1024, 1024);
+key.shadow.camera.left = -2.2; key.shadow.camera.right = 2.2;
+key.shadow.camera.top = 2.2;   key.shadow.camera.bottom = -2.2;
+key.shadow.camera.near = 0.5;  key.shadow.camera.far = 12;
+key.shadow.bias = -0.0006; key.shadow.normalBias = 0.018; key.shadow.radius = 2.5;
+scene.add(key, key.target);
+key.target.position.copy(CENTER);
+
+const fill = new THREE.DirectionalLight(0xF0E4E0, 0.26);
+fill.position.set(3.0, -0.6, 1.4);
+scene.add(fill);
+
+// Warm bounce from below tints the shadowed interior toward the brand's dark
+// orange rather than letting it go grey.
+scene.add(new THREE.HemisphereLight(new THREE.Color(BRAND.sky), new THREE.Color(BRAND.bounce), 0.34));
+
+const groundShadow = new THREE.Mesh(
+  new THREE.PlaneGeometry(14, 14),
+  new THREE.ShadowMaterial({ opacity: 0.14 })
+);
+groundShadow.rotation.x = -Math.PI/2;
+groundShadow.position.set(CENTER.x, FLOOR, CENTER.z);
+groundShadow.receiveShadow = true;
+scene.add(groundShadow);
+
 // ===========================================================================
-// 4 · Levitation, pointer, loop
+// 4 · Camera, orbit, and flying it around
+// ===========================================================================
+
+// Orthographic on purpose. Under perspective the left tip — which sits well
+// behind the right — would shrink by about 6%, and the home view would stop
+// being the logo. Ortho keeps the mark exact head-on and still orbits freely.
+const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 100);
+const HOME = new THREE.Vector3(CENTER.x, CENTER.y, CENTER.z + 6);
+camera.position.copy(HOME);
+
+const controls = new OrbitControls(camera, canvas);
+controls.target.copy(CENTER);
+controls.enableDamping = true; controls.dampingFactor = 0.055;
+controls.screenSpacePanning = true;
+controls.minZoom = 0.35; controls.maxZoom = 6;
+
+function resize() {
+  const w = innerWidth, h = innerHeight;
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+  renderer.setSize(w, h, false);
+  canvas.style.width = w+'px'; canvas.style.height = h+'px';
+  const aspect = w/h, fit = 1.30;
+  const hw = aspect > VIEW.hw/VIEW.hh ? VIEW.hh*fit*aspect : VIEW.hw*fit;
+  const hh = aspect > VIEW.hw/VIEW.hh ? VIEW.hh*fit : VIEW.hw*fit/aspect;
+  camera.left=-hw; camera.right=hw; camera.top=hh; camera.bottom=-hh;
+  camera.updateProjectionMatrix();
+}
+addEventListener('resize', resize);
+resize();
+controls.update();
+
+const ray = new THREE.Raycaster();
+const ndc = new THREE.Vector2();
+const dragPlane = new THREE.Plane();
+const grabPoint = new THREE.Vector3();
+const dragPoint = new THREE.Vector3();
+const hitPoint = new THREE.Vector3();
+let grabbed = [];          // {i, ox, oy, oz, w}
+let dragging = false, interacted = false;
+
+const setNdc = (ev) => {
+  const r = canvas.getBoundingClientRect();
+  ndc.x = ((ev.clientX-r.left)/r.width)*2-1;
+  ndc.y = -((ev.clientY-r.top)/r.height)*2+1;
+};
+
+canvas.addEventListener('pointerdown', (ev) => {
+  setNdc(ev);
+  ray.setFromCamera(ndc, camera);
+  geometry.computeBoundingSphere();
+  const hit = ray.intersectObject(cloak, false)[0];
+  if (!hit) return;                               // empty space: leave it to the orbit
+  hitPoint.copy(hit.point);
+  grabPoint.copy(hit.point);
+  dragPoint.copy(hit.point);
+  dragPlane.setFromNormalAndCoplanarPoint(camera.getWorldDirection(new THREE.Vector3()).negate(), hit.point);
+
+  // Take a handful of silk, not a single vertex, so it flies coherently.
+  const R = 0.30, R2 = R*R;
+  grabbed = [];
+  cloth.held.fill(0);
+  for (let i=0;i<mesh.count;i++) {
+    const n=i*3;
+    const dx=cloth.pos[n]-hit.point.x, dy=cloth.pos[n+1]-hit.point.y, dz=cloth.pos[n+2]-hit.point.z;
+    const d2 = dx*dx+dy*dy+dz*dz;
+    if (d2 > R2) continue;
+    const t = 1 - Math.sqrt(d2)/R;
+    const w = t*t*(3-2*t);                        // smooth falloff
+    cloth.held[i] = w;
+    grabbed.push({ i, ox:dx, oy:dy, oz:dz, w });
+  }
+  if (!grabbed.length) return;
+  dragging = true;
+  controls.enabled = false;
+  canvas.classList.add('grabbing');
+  canvas.setPointerCapture(ev.pointerId);
+  interacted = true;
+  document.getElementById('hint').classList.add('gone');
+});
+
+canvas.addEventListener('pointermove', (ev) => {
+  if (!dragging) return;
+  setNdc(ev);
+  ray.setFromCamera(ndc, camera);
+  ray.ray.intersectPlane(dragPlane, dragPoint);
+});
+
+const release = () => {
+  if (!dragging) return;
+  dragging = false;
+  cloth.held.fill(0);
+  grabbed = [];
+  controls.enabled = true;
+  canvas.classList.remove('grabbing');
+};
+canvas.addEventListener('pointerup', release);
+canvas.addEventListener('pointercancel', release);
+
+canvas.addEventListener('dblclick', () => {
+  camera.position.copy(HOME);
+  controls.target.copy(CENTER);
+  controls.update();
+});
+
+// ===========================================================================
+// 5 · Loop
 // ===========================================================================
 
 const noise = (x,y,t) =>
@@ -407,165 +718,129 @@ const noise = (x,y,t) =>
   + 0.5 * Math.sin(x*3.1 - y*2.7 + t*1.31)
   + 0.25 * Math.cos(x*5.3 + y*4.1 - t*1.9);
 
-const pointer = new THREE.Vector2(0,0);
-const world   = new THREE.Vector3();
-const ray     = new THREE.Raycaster();
-const plane   = new THREE.Plane(new THREE.Vector3(0,0,1), 0);
-let pointerIn=false, dragging=false, shade=0, interacted=false;
-let floatPos = new THREE.Vector3(), floatPrev = new THREE.Vector3(), floatVel = new THREE.Vector3();
-
-function resize() {
-  const w = Math.min(window.innerWidth, 1400), h = Math.min(window.innerHeight, 1000);
-  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
-  renderer.setSize(w, h, true);
-  const fit = 1.28, aspect = w/h;
-  const hw = aspect > VIEW.hw/VIEW.hh ? VIEW.hh*fit*aspect : VIEW.hw*fit;
-  const hh = aspect > VIEW.hw/VIEW.hh ? VIEW.hh*fit : VIEW.hw*fit/aspect;
-  camera.left=-hw; camera.right=hw; camera.top=hh; camera.bottom=-hh;
-  camera.updateProjectionMatrix();
-}
-addEventListener('resize', resize); resize();
-
-function toWorldPoint(ev) {
-  const r = canvas.getBoundingClientRect();
-  pointer.x = ((ev.clientX-r.left)/r.width)*2-1;
-  pointer.y = -((ev.clientY-r.top)/r.height)*2+1;
-  ray.setFromCamera(pointer, camera);
-  ray.ray.intersectPlane(plane, world);
-}
-
-canvas.addEventListener('pointermove', (ev) => { pointerIn=true; toWorldPoint(ev); });
-canvas.addEventListener('pointerleave', () => { pointerIn=false; });
-canvas.addEventListener('pointerdown', (ev) => {
-  canvas.setPointerCapture(ev.pointerId); toWorldPoint(ev);
-  let best=-1, bestD=0.16;
-  for (let i=0;i<mesh.count;i++) {
-    if (mesh.anchor[i] > 0.5) continue;                       // the apex stays put
-    const n=i*3;
-    const d = Math.hypot(cloth.pos[n]-world.x, cloth.pos[n+1]-world.y);
-    if (d < bestD) { bestD=d; best=i; }
-  }
-  if (best >= 0) { cloth.grabbed=best; dragging=true; canvas.classList.add('grabbing'); }
-  interacted = true; document.getElementById('hint').classList.add('gone');
-});
-const release = () => { cloth.grabbed=-1; dragging=false; canvas.classList.remove('grabbing'); };
-canvas.addEventListener('pointerup', release);
-canvas.addEventListener('pointercancel', release);
-
 const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
 let last = performance.now(), frozen = false, lastFrameMs = 0;
 
 function frame(now) {
   if (!reduced) requestAnimationFrame(frame);
-  const dt = Math.min((now-last)/1000, 1/30); last = now;
+  // Never zero: XPBD divides compliance by the substep squared, and a zero
+  // frame turns that into Infinity * 0 = NaN, which poisons every position.
+  const dt = Math.min(Math.max((now-last)/1000, 1/1000), 1/30); last = now;
+
   if (!frozen) {
     const t = now/1000;
-
     if (!reduced) {
-      // Levitation: the whole mark drifts, and the fabric lags behind it.
-      floatPrev.copy(floatPos);
-      floatPos.set(Math.sin(t*0.41)*0.045 + Math.sin(t*0.23)*0.02,
-                   Math.sin(t*0.57)*0.038 + Math.cos(t*0.31)*0.016, 0);
-      floatVel.subVectors(floatPos, floatPrev);
-      cloak.position.copy(floatPos);
-
-      // Wind, held off the apex so the cloak hangs rather than flaps.
+      // Levitation: a slow swell across the whole sheet, plus wind that the
+      // free edges feel more than the body.
       const { rest, force } = cloth;
       const W = SILK.wind, S = SILK.windScale, sp = t*SILK.windSpeed;
+      // Sized so the whole mark drifts about 2% of its width, not so much
+      // that the levitation itself pulls the silhouette off the artwork.
+      const swellX = (Math.sin(t*0.41)*0.9 + Math.sin(t*0.23)*0.4) * 0.55;
+      const swellY = (Math.sin(t*0.57)*0.8 + Math.cos(t*0.31)*0.35) * 0.55;
       for (let i=0;i<mesh.count;i++) {
-        const n=i*3, free = 1 - mesh.anchor[i];
+        const n=i*3;
+        const free = (0.3 + 0.7*(1 - mesh.anchor[i])) * (i >= mesh.foldStart ? 0.45 : 1);
         const x=rest[n]*S, y=rest[n+1]*S;
-        force[n]   += noise(x, y, sp) * W * free * 0.6;
-        force[n+1] += noise(x+11.3, y-4.7, sp*0.9) * W * free * 0.5;
+        force[n]   += swellX + noise(x, y, sp) * W * free * 0.6;
+        force[n+1] += swellY + noise(x+11.3, y-4.7, sp*0.9) * W * free * 0.5;
         force[n+2] += noise(x-7.1, y+9.2, sp*1.1) * W * free;
-        force[n]   -= floatVel.x * 260 * free;      // inertia of the drift
-        force[n+1] -= floatVel.y * 260 * free;
       }
     }
 
-    if (dragging && cloth.grabbed >= 0) {
-      const n = cloth.grabbed*3;
-      cloth.pos[n]   = world.x - cloak.position.x;
-      cloth.pos[n+1] = world.y - cloak.position.y;
-      cloth.pos[n+2] = Math.max(cloth.rest[n+2], 0.25);
-    } else if (pointerIn && !reduced) {
-      // Hovering pushes the silk out of the way.
-      for (let i=0;i<mesh.count;i++) {
-        const n=i*3, free = 1 - mesh.anchor[i];
-        const dx = cloth.pos[n]+cloak.position.x - world.x, dy = cloth.pos[n+1]+cloak.position.y - world.y;
-        const d2 = dx*dx + dy*dy;
-        if (d2 < 0.09) {
-          const f = (1 - d2/0.09) * 3.2 * free;
-          cloth.addForce(i, dx*f, dy*f, f*0.9);
-        }
+    if (dragging) {
+      // Carry the held handful to the pointer, and keep its velocity so
+      // letting go mid-flick actually throws the silk.
+      for (const g of grabbed) {
+        const n = g.i*3;
+        const tx = dragPoint.x + g.ox, ty = dragPoint.y + g.oy, tz = dragPoint.z + g.oz;
+        cloth.vel[n]   = (tx - cloth.pos[n])/Math.max(dt,1e-3);
+        cloth.vel[n+1] = (ty - cloth.pos[n+1])/Math.max(dt,1e-3);
+        cloth.vel[n+2] = (tz - cloth.pos[n+2])/Math.max(dt,1e-3);
+        cloth.pos[n]   += (tx - cloth.pos[n])*g.w;
+        cloth.pos[n+1] += (ty - cloth.pos[n+1])*g.w;
+        cloth.pos[n+2] += (tz - cloth.pos[n+2])*g.w;
       }
     }
 
-    cloth.step(dt);
-    geometry.computeVertexNormals();
+    // Settled silk cannot be inside itself, so the broad phase only earns its
+    // cost while something is actually moving.
+    if (dragging || cloth.energy() > 0.004) cloth.buildPairs(); else cloth.pairCount = 0;
+    cloth.step(dt, dragging);
     geometry.attributes.position.needsUpdate = true;
+    geometry.computeVertexNormals();
     geometry.attributes.normal.needsUpdate = true;
-
-    // Lighting fades in with movement, so the mark is flat when it settles.
-    const target = Math.min(cloth.energy() / 0.030, 1);
-    shade += (target - shade) * (target > shade ? 0.16 : 0.05);
-    material.uniforms.uShade.value = shade;
+    geometry.computeBoundingSphere();
   }
+
+  if (!frozen) controls.update();     // frozen means a test owns the camera
   renderer.render(scene, camera);
   lastFrameMs = performance.now() - now;
 }
+
 if (reduced) {
-  // Honour the preference literally: draw the mark once, at rest, and stop.
   geometry.attributes.position.needsUpdate = true;
+  geometry.computeBoundingSphere();
+  controls.update();
   renderer.render(scene, camera);
 } else {
   requestAnimationFrame(frame);
+  setTimeout(() => { if (!interacted) document.getElementById('hint').classList.add('gone'); }, 11000);
 }
 
-// Hooks for the projection test: freeze at the exact rest pose and set the
-// camera to the artwork's own viewBox, so a screenshot can be diffed against
-// the original SVG pixel for pixel.
+// Hooks for the checks in verify.mjs / motion.mjs / interact.mjs.
 window.__cloak = {
-  // keepState renders whatever the cloth has settled into, rather than
-  // snapping it back, so "does it return on its own" is actually measurable.
-  testView(px, py, keepState) {
+  homeView(px, py, keepState) {
     frozen = true;
-    cloak.position.set(0,0,0);
-    if (!keepState) { cloth.pos.set(cloth.rest); cloth.prev.set(cloth.rest); }
+    if (!keepState) { cloth.pos.set(cloth.rest); cloth.vel.fill(0); }
     geometry.attributes.position.needsUpdate = true;
     geometry.computeVertexNormals();
-    material.uniforms.uShade.value = 0;
-    renderer.setPixelRatio(1); renderer.setSize(px, py, true);
+    geometry.computeBoundingSphere();
+    renderer.setPixelRatio(1); renderer.setSize(px, py, false);
+    canvas.style.width = px+'px'; canvas.style.height = py+'px';
+    camera.position.set(0, 0, 6);
+    controls.target.set(0, 0, 0);
+    camera.zoom = 1;
     camera.left=-VIEW.hw; camera.right=VIEW.hw; camera.top=VIEW.hh; camera.bottom=-VIEW.hh;
     camera.updateProjectionMatrix();
+    camera.lookAt(0,0,0); camera.updateMatrixWorld();   // not controls.update(): it owns its own state
     renderer.render(scene, camera);
   },
-  spin(angle) {
-    cloak.rotation.y = angle;
-    material.uniforms.uShade.value = 1;
+  orbit(theta, phi) {
+    const r = 6;
+    camera.position.set(r*Math.sin(theta)*Math.cos(phi), r*Math.sin(phi), r*Math.cos(theta)*Math.cos(phi));
+    camera.lookAt(0,0,0); camera.updateMatrixWorld();
     renderer.render(scene, camera);
   },
-  // Displace the cloth by hand so its settling can be measured.
   poke(strength = 1) {
     frozen = false;
     for (let i=0;i<mesh.count;i++) {
-      const n=i*3, free = 1 - mesh.anchor[i];
-      cloth.pos[n]   += 0.55*strength*free;
-      cloth.pos[n+1] += 0.30*strength*free*Math.sin(mesh.uvs[i*2]*6.0);
-      cloth.pos[n+2] += 0.45*strength*free;
+      const n=i*3, free = 1 - mesh.anchor[i]*0.5;
+      cloth.vel[n]   += 1.7*strength*free;
+      cloth.vel[n+1] += 1.0*strength*free*Math.sin(mesh.uvs[i*2]*6.0);
+      cloth.vel[n+2] += 1.4*strength*free;
     }
   },
+  thaw() { frozen = false; },
+  profile(n) {
+    const t0=performance.now(); for(let i=0;i<n;i++) cloth.buildPairs(); const tPairs=(performance.now()-t0)/n;
+    const t1=performance.now(); for(let i=0;i<n;i++) cloth.step(1/60,false); const tStep=(performance.now()-t1)/n;
+    const t2=performance.now(); for(let i=0;i<n;i++) geometry.computeVertexNormals(); const tNorm=(performance.now()-t2)/n;
+    const t3=performance.now(); for(let i=0;i<n;i++) renderer.render(scene,camera); const tDraw=(performance.now()-t3)/n;
+    return { pairs:+tPairs.toFixed(2), solve:+tStep.toFixed(2), normals:+tNorm.toFixed(2), draw:+tDraw.toFixed(2) };
+  },
   energy: () => cloth.energy(),
+  overlap: () => cloth.worstOverlap(),
+  pairs: () => cloth.pairCount,
   frameMs: () => lastFrameMs,
   setKnobs(next) {
     Object.assign(KNOBS, next);
     const m = buildRestMesh(mesh.nu, mesh.nv, mesh.nw, KNOBS);
-    mesh.rest.set(m.rest); cloth.rest = mesh.rest;
-    cloth.pos.set(m.rest); cloth.prev.set(m.rest);
+    mesh.rest.set(m.rest);
+    cloth.pos.set(m.rest); cloth.vel.fill(0);
     geometry.attributes.position.needsUpdate = true;
     geometry.computeVertexNormals();
   },
   knobs: KNOBS, stats: { verts: mesh.count, tris: mesh.indices.length/3 },
 };
-if (!reduced) setTimeout(() => { if (!interacted) document.getElementById('hint').classList.add('gone'); }, 9000);
 </script>

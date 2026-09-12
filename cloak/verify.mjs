@@ -65,7 +65,7 @@ console.log('mesh:', await page.evaluate('JSON.stringify(window.__cloak.stats)')
 
 const knobArg = process.argv[2] ? JSON.parse(process.argv[2]) : null;
 if (knobArg) await page.evaluate((k) => window.__cloak.setKnobs(k), knobArg);
-await page.evaluate(([w,h]) => window.__cloak.testView(w,h), [W,H]);
+await page.evaluate(([w,h]) => window.__cloak.homeView(w,h), [W,H]);
 await page.waitForTimeout(120);
 const shotPath = path.join(HERE, 'out-rest.png');
 await page.screenshot({ path: shotPath, clip:{x:0,y:0,width:W,height:H} });

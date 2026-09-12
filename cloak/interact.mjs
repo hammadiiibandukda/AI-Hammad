@@ -14,6 +14,7 @@ await p.goto('file://'+path.join(HERE,'cloak.html'));
 await p.waitForFunction('window.__cloak!==undefined',null,{timeout:20000});
 await p.waitForTimeout(800);
 
+const idle = await p.evaluate(()=>window.__cloak.energy());
 const shots = [];
 const snap = async (label) => shots.push([label, await p.screenshot({type:'jpeg', quality:80})]);
 await snap('at rest');
@@ -30,7 +31,8 @@ await snap('settled');
 const after = await p.evaluate(()=>window.__cloak.energy());
 console.log(`energy while dragged ${dragged.toFixed(4)} -> 3s after release ${after.toFixed(4)}`);
 console.log(dragged > 0.02 ? 'drag moved the cloth' : 'WARNING: drag had no effect');
-console.log(after < 0.006 ? 'returned to rest' : 'WARNING: did not return');
+console.log(`idle energy is ${idle.toFixed(4)} (the levitation drift)`);
+console.log(`settled to ${(after/idle).toFixed(1)}x idle` + (after < idle*3 ? '  — returned to rest' : '  — WARNING: did not return'));
 
 const strip = await ctx.newPage();
 await strip.setViewportSize({width:1300,height:250});

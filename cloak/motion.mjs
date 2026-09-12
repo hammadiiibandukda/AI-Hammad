@@ -23,18 +23,24 @@ console.log(`idle energy (levitating)  ${idle.toFixed(5)}`);
 await p.evaluate(()=>window.__cloak.poke(1));
 const frames = [];
 const trace = [];
+const overlaps = [];
 for (let i=0;i<26;i++) {
   const e = await p.evaluate(()=>window.__cloak.energy());
-  trace.push(e);
+  const ov = await p.evaluate(()=>window.__cloak.overlap());
+  trace.push(e); overlaps.push(ov);
   if ([0,1,2,4,7,12,20].includes(i)) frames.push(await p.screenshot({ type:'jpeg', quality:78 }));
   await p.waitForTimeout(100);
 }
 console.log('settle trace (energy every 100ms):');
 console.log('  ' + trace.map(v=>v.toFixed(4)).join(' '));
 // Visually at rest = mean displacement under 0.2% of the mark's width.
-const settled = trace.findIndex((v,i)=> i>2 && v < 0.004);
+const settled = trace.findIndex((v,i)=> i>2 && v < idle*1.8);
 console.log(settled>=0 ? `visually settled after ~${(settled*0.1).toFixed(1)}s` : 'DID NOT SETTLE');
-console.log(`finite: ${trace.every(Number.isFinite)}   max: ${Math.max(...trace).toFixed(4)}`);
+console.log(`finite: ${trace.every(Number.isFinite)}   max energy: ${Math.max(...trace).toFixed(4)}`);
+const worstOverlap = Math.max(...overlaps);
+console.log(`worst self-intersection during the throw: ${(worstOverlap*100).toFixed(1)}% of fabric thickness`);
+console.log(worstOverlap < 0.25 ? 'cloth stayed out of itself' : 'WARNING: cloth passed through itself');
+console.log(`collision pairs tracked: ${await p.evaluate(()=>window.__cloak.pairs())}`);
 console.log(`frame cost: ${(await p.evaluate(()=>window.__cloak.frameMs())).toFixed(1)}ms (software GL; real GPU far lower)`);
 console.log(`mesh: ${await p.evaluate(()=>JSON.stringify(window.__cloak.stats))}`);
 
@@ -50,7 +56,7 @@ const back = await p.evaluate(([w,h,main,dark])=>{
   const s=w/84.8388; g.setTransform(s,0,0,s,-72.2972*s,-91.7177*s);
   g.fillStyle='#D0470C'; g.fill(new Path2D(dark)); g.fillStyle='#FF6625'; g.fill(new Path2D(main));
   const R=g.getImageData(0,0,w,h).data;
-  window.__cloak.testView(w,h,true);   // keep whatever it settled into
+  window.__cloak.homeView(w,h,true);   // keep whatever it settled into
   const b=document.createElement('canvas'); b.width=w; b.height=h;
   const bg=b.getContext('2d',{willReadFrequently:true});
   bg.drawImage(document.getElementById('stage'),0,0,w,h);
