@@ -65,11 +65,14 @@ const objective = (r) => r.back + 0.5*r.sil - 9.0*r.spill - 8.0*Math.max(0, 0.98
 
 // Stage 2 only: the body's outline is exact by construction, so these knobs
 // exist to shape the crease and the roll, not to buy silhouette accuracy.
+// Depth is now fixed by the orthographic reference, so the fit only shapes
+// the fold. leftPow tilts the crease without changing how deep the shell is.
 const BOUNDS = {
-  leftBack:[0.05,1.10], leftPow:[1.20,7.00], backDepth:[0.55,1.30],
-  curlLen:[0.25,1.80], curlEndFrac:[0.05,1.00], curlTaper:[0.40,3.20],
-  curlAngle:[1.60,5.60], curlAngleEnd:[0.20,1.20], curlEase:[0.25,1.60],
-  curlOpen:[0.00,1.40], curlLift:[-1.80,1.80], curlAxis:[-2.80,2.80],
+  leftPow:[1.20,7.00],
+  curlRadius:[0.015,0.30], foldReach:[0.10,0.85],
+  curlAngle:[1.80,4.40], curlAngleEnd:[0.20,1.20], curlEase:[0.25,1.60],
+  curlEndFrac:[0.05,1.00], curlTaper:[0.40,3.20],
+  curlLift:[-1.80,1.80], curlAxis:[-2.80,2.80],
 };
 const KEYS = Object.keys(BOUNDS);
 const clampK = (k) => { const o={}; for (const key of KEYS) o[key]=Math.min(BOUNDS[key][1],Math.max(BOUNDS[key][0],k[key])); return o; };

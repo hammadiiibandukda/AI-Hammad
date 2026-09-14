@@ -106,21 +106,20 @@ function coons(u,v) {
 }
 
 const KNOBS = {
-  // Fitted against the artwork: frozen at rest the home view reproduces the
-  // original at 99.1% body / 87.4% fold / 98.4% overall silhouette (verify.mjs).
-  depth: 0.46, bulgePow: 1.35, fallPow: 1.15, apexPush: 0.10,
-  leftBack: 0.601,      // left wing turns away from camera
-  leftPow: 2.3262,
-  curlLen: 1.0024,        // fabric beyond the crease at the left tip
-  curlEndFrac: 0.8828,// how much survives at the hinge, where the corner is cut
-  curlTaper: 3.2,    // how the fold runs out along the crease
-  curlAngle: 5.0917,    // turnover at the tip; past a right angle shows the reverse
-  curlAngleEnd: 0.7145,
-  curlEase: 1.2788,      // how sharply the crease turns over
-  curlOpen: 0.4943,      // how far the reversed flap reaches past the near side
-  curlLift: 0.954, curlAxis: -1.768,
-  backDepth: 0.92,     // how far the hidden back of the cone swells behind
-  curlSign: 1,         // +1 rolls the hem away from the viewer, -1 toward it
+  // Depth matched to the orthographic reference: the mark is a shallow shell,
+  // about a third as deep as it is wide, not a fat cone.
+  depth: 0.28, bulgePow: 1.35, fallPow: 1.15, apexPush: 0.10,
+  leftBack: 0.42, leftPow: 3.3965,
+  backDepth: 0.92,     // how far the hidden back of the shell swells behind
+  curlRadius: 0.1147,    // how tight the crease is
+  foldReach: 0.2617,     // how far the reversed flap lies out past the crease
+  curlAngle: 3.596,     // how far it turns; past a right angle shows the underside
+  curlAngleEnd: 0.955,
+  curlEndFrac: 1,   // how much fold survives at the hinge, where the corner is cut
+  curlTaper: 0.862,      // how the fold runs out along the crease
+  curlEase: 1.6,      // how sharply the crease turns over
+  curlLift: 1.62, curlAxis: -0.952,
+  curlSign: 1,         // +1 folds away from the viewer, -1 toward it
 };
 
 const clamp01 = x => x<0?0:x>1?1:x;
@@ -162,26 +161,28 @@ function foldFrame(u,k) {
   return { c, tangent, outward, normal };
 }
 
-// Length and turnover vary along the crease: most fabric at the left tip,
-// running down to a cut corner at the hinge, which is the straight edge the
-// artwork shows there.
+// The fold is a flat turn-back, not a scroll. On a shallow shell the hem
+// creases sharply and the reversed flap lies almost against the body, so its
+// underside faces the camera nearly square-on — a broad dark area with very
+// little depth. A tight roll would present the same fabric edge-on instead,
+// which is why it needed to be enormous to read at all.
+//
+// Crease tightness and how far the flap reaches are therefore separate: a
+// small radius for the crease, an absolute reach for the flat part.
 function foldProfile(u,k) {
   const s = clamp01((U_HINGE-u)/U_HINGE);
   return {
-    len: k.curlLen * (k.curlEndFrac + (1-k.curlEndFrac)*Math.pow(s, k.curlTaper)),
+    taper: k.curlEndFrac + (1-k.curlEndFrac)*Math.pow(s, k.curlTaper),
     phi: k.curlAngle * (k.curlAngleEnd + (1-k.curlAngleEnd)*Math.pow(s, k.curlTaper*0.6)),
   };
 }
 
 function foldPoint(u,w,k) {
   const { c, outward, normal } = foldFrame(u,k);
-  const { len, phi } = foldProfile(u,k);
-  if (len <= 1e-6) return c;
-  // curlEase front-loads the rotation so the cloth turns over right at the
-  // crease and the rest of the flap reaches outward already reversed. That is
-  // what lets a backward fold still show its underside from the front.
+  const { taper, phi } = foldProfile(u,k);
+  if (taper <= 1e-6) return c;
   const th = phi * Math.pow(clamp01(w), k.curlEase);
-  const radius = len / Math.max(phi, 1e-3);
+  const radius = k.curlRadius * taper;
   const side = cross(outward, normal);
   const ca = Math.cos(k.curlAxis), sa = Math.sin(k.curlAxis);
   const sg = k.curlSign;
@@ -190,7 +191,7 @@ function foldPoint(u,w,k) {
     sg*(-normal[1]*ca + side[1]*sa) + k.curlLift,
     sg*(-normal[2]*ca + side[2]*sa),
   ]);
-  const reach = radius*Math.sin(th) + k.curlOpen*len*clamp01(w);
+  const reach = radius*Math.sin(th) + k.foldReach*taper*clamp01(w);
   const lift  = radius*(1-Math.cos(th));
   return [
     c[0] + reach*outward[0] + lift*back[0],
@@ -824,6 +825,7 @@ window.__cloak = {
     }
   },
   thaw() { frozen = false; },
+  setZoom(z) { camera.zoom = z; camera.updateProjectionMatrix(); renderer.render(scene, camera); },
   profile(n) {
     const t0=performance.now(); for(let i=0;i<n;i++) cloth.buildPairs(); const tPairs=(performance.now()-t0)/n;
     const t1=performance.now(); for(let i=0;i<n;i++) cloth.step(1/60,false); const tStep=(performance.now()-t1)/n;

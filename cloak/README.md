@@ -38,12 +38,13 @@ Accuracy is built in, not tuned toward:
 
 | | |
 |---|---|
-| body silhouette | **99.06%** IoU against the SVG |
-| fold, reading as the dark tone | **87.43%** |
-| overall silhouette | **98.44%** |
-| painted outside the artwork | 0.25% of frame |
-| after a hard throw and 2.6s settle | **97.49%** |
+| body silhouette | **99.32%** IoU against the SVG |
+| fold, reading as the dark tone | **55.6%** — see Known limits |
+| overall silhouette | **94.37%** |
+| painted outside the artwork | 0.13% of frame |
+| after a hard throw and 2.6s settle | **93.08%** |
 | worst self-intersection during a throw | **0.0%** of fabric thickness |
+| depth ÷ width | **0.35**, matching the orthographic reference |
 
 ## The physics
 
@@ -88,9 +89,14 @@ home. Re-run `verify.mjs` after touching the drape knobs.
 
 ## Known limits
 
-- The fold is the weakest part of the fit. A backward roll has to turn past a
-  right angle before its underside shows, and the artwork's lobe is a specific
-  shape.
+- **The fold and the depth are in tension.** Matched to the reference side
+  view the shell is about a third as deep as it is wide, and at that depth
+  there simply isn't enough geometry turned away from the camera to fill the
+  flat artwork's dark lobe — the fold reads 55.6% instead of the 87% a much
+  deeper scroll reached. The reference front view shows a smaller dark lip
+  than the SVG does, so the open question is which of the two is the target:
+  the flat mark, or the drawn object. If it is the flat mark, the rest of the
+  darkness has to come from shadow rather than from turned-away geometry.
 - The lit body measures about `#FB7142` against the brand's `#FF6625`, and the
   fold interior about `#A2472B` against `#D0470C`. The two-tone reading is
   right; the exact values are a lighting judgement, not a fit.
