@@ -61,18 +61,17 @@ await page.evaluate(([w,h,main,dark]) => {
 const evalKnobs = (k) => page.evaluate((kk) => window.__score(kk), k);
 // Back-face lobe is what we are solving for; front and spill act as guards so
 // the fold cannot win by creeping over the body or outside the artwork.
-const objective = (r) => r.back + 0.5*r.sil - 9.0*r.spill - 8.0*Math.max(0, 0.985 - r.front);
+// Silhouette leads now: the whole form is being fitted, not just the fold.
+const objective = (r) => 0.50*r.sil + 0.28*r.front + 0.22*r.back - 2.0*r.spill;
 
 // Stage 2 only: the body's outline is exact by construction, so these knobs
 // exist to shape the crease and the roll, not to buy silhouette accuracy.
-// Depth is now fixed by the orthographic reference, so the fit only shapes
-// the fold. leftPow tilts the crease without changing how deep the shell is.
+// A real cut cone: where the tip sits, how it leans, how fast it widens, how
+// round its cross-section is, and the plane that cuts the bottom off.
 const BOUNDS = {
-  leftPow:[1.20,7.00],
-  curlRadius:[0.015,0.30], foldReach:[0.10,0.85],
-  curlAngle:[1.80,4.40], curlAngleEnd:[0.20,1.20], curlEase:[0.25,1.60],
-  curlEndFrac:[0.05,1.00], curlTaper:[0.40,3.20],
-  curlLift:[-1.80,1.80], curlAxis:[-2.80,2.80],
+  apexZ:[-0.45,0.45], tiltX:[-0.85,0.85], tiltZ:[-0.65,0.65],
+  flare:[0.30,2.60], aspect:[0.10,0.42], profile:[0.60,2.60],   // aspect held to the reference side view
+  cutPitch:[-1.50,1.50], cutRoll:[-1.50,1.50], cutDrop:[0.20,2.60], maxLen:[0.8,3.2],
 };
 const KEYS = Object.keys(BOUNDS);
 const clampK = (k) => { const o={}; for (const key of KEYS) o[key]=Math.min(BOUNDS[key][1],Math.max(BOUNDS[key][0],k[key])); return o; };
@@ -84,7 +83,7 @@ let bestR = await evalKnobs(best), bestS = objective(bestR);
 console.log(`start   front ${(bestR.front*100).toFixed(1)}  back ${(bestR.back*100).toFixed(1)}  sil ${(bestR.sil*100).toFixed(1)}`);
 
 // Random restarts to find the basin, then shrinking coordinate descent.
-for (let trial=0; trial < (process.argv.includes('--seed') ? 80 : 260); trial++) {
+for (let trial=0; trial < (process.argv.includes('--seed') ? 80 : 420); trial++) {
   const cand = {}; for (const k of KEYS) cand[k] = BOUNDS[k][0] + Math.random()*(BOUNDS[k][1]-BOUNDS[k][0]);
   const r = await evalKnobs(cand), s = objective(r);
   if (s > bestS) { bestS=s; bestR=r; best=cand;

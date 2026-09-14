@@ -106,149 +106,101 @@ function coons(u,v) {
 }
 
 const KNOBS = {
-  // Depth matched to the orthographic reference: the mark is a shallow shell,
-  // about a third as deep as it is wide, not a fat cone.
-  depth: 0.28, bulgePow: 1.35, fallPow: 1.15, apexPush: 0.10,
-  leftBack: 0.42, leftPow: 3.3965,
-  backDepth: 0.92,     // how far the hidden back of the shell swells behind
-  curlRadius: 0.1147,    // how tight the crease is
-  foldReach: 0.2617,     // how far the reversed flap lies out past the crease
-  curlAngle: 3.596,     // how far it turns; past a right angle shows the underside
-  curlAngleEnd: 0.955,
-  curlEndFrac: 1,   // how much fold survives at the hinge, where the corner is cut
-  curlTaper: 0.862,      // how the fold runs out along the crease
-  curlEase: 1.6,      // how sharply the crease turns over
-  curlLift: 1.62, curlAxis: -0.952,
-  curlSign: 1,         // +1 folds away from the viewer, -1 toward it
+  // A real cone, cut by a plane. Cross-sections are ellipses about an axis —
+  // not a front sheet and a back sheet sharing the same x and y — so the cut
+  // leaves an actual opening you can see into, and the dark in the flat mark
+  // is the inside of the far wall seen through it.
+  apexZ: -0.3338,        // where the tip sits in depth
+  tiltX: -0.0034,        // lean toward (+) or away from the viewer
+  tiltZ: -0.0505,       // lean left / right
+  flare: 1.5689,        // how fast the cone widens
+  aspect: 0.6205,       // cross-section depth ÷ width (1 = circular)
+  profile: 1.0679,      // 1 = straight sides, >1 = bell, <1 = horn
+  cutPitch: 0.1468,     // cut plane tipped front-to-back
+  cutRoll: -0.6262,     // ... and side to side
+  cutDrop: 1.6388,      // how far down the axis the cut falls
+  maxLen: 1.2099,        // how much cone there is, where the cut never reaches
 };
 
 const clamp01 = x => x<0?0:x>1?1:x;
 const sub=(a,b)=>[a[0]-b[0],a[1]-b[1],a[2]-b[2]];
+const add=(a,b)=>[a[0]+b[0],a[1]+b[1],a[2]+b[2]];
+const mul=(a,t)=>[a[0]*t,a[1]*t,a[2]*t];
 const cross=(a,b)=>[a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0]];
 const dot=(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
 const norm=(a)=>{const l=Math.hypot(a[0],a[1],a[2])||1; return [a[0]/l,a[1]/l,a[2]/l];};
 
-// The mark is a veil thrown over something: a hollow cone, pinched at the apex
-// and open at the hem. Depth splits into the cone's centre line, which both
-// halves share, and a bulge that swells the front toward the camera and the
-// back away from it. The bulge vanishes at u=0 and u=1, so the two halves meet
-// exactly along the silhouette and close the cone without a seam.
-function conePoint(u,v,k) {
-  const [x,y] = toWorld(coons(u,v));
-  const across = Math.pow(Math.sin(Math.PI*clamp01(u)), k.bulgePow);
-  const down = Math.pow(clamp01(v), k.fallPow);
-  const axis = -k.leftBack*Math.pow(1-clamp01(u), k.leftPow)*down
-             + k.apexPush*Math.pow(1-clamp01(v), 3);
-  return { x, y, axis, bulge: k.depth*across*down };
+// The apex is pinned to the artwork's own tip; everything else is free.
+const APEX_XY = toWorld([122.80, 92.30]);
+
+function coneFrame(k) {
+  const apex = [APEX_XY[0], APEX_XY[1], k.apexZ];
+  const axis = norm([Math.sin(k.tiltZ), -Math.cos(k.tiltX)*Math.cos(k.tiltZ), Math.sin(k.tiltX)]);
+  const ref = Math.abs(axis[1]) > 0.95 ? [1,0,0] : [0,1,0];
+  const e1 = norm(cross(axis, ref));     // across the view
+  const e2 = norm(cross(axis, e1));      // into the view
+  const cutN = norm([Math.sin(k.cutRoll), -Math.cos(k.cutPitch)*Math.cos(k.cutRoll), Math.sin(k.cutPitch)]);
+  const cutQ = add(apex, mul(axis, k.cutDrop));
+  return { apex, axis, e1, e2, cutN, cutQ };
 }
 
-function draped(u,v,k,back) {
-  const { x, y, axis, bulge } = conePoint(u,v,k);
-  return [x, y, axis + (back ? -bulge*k.backDepth : bulge)];
+// A point on the cone wall: h down the axis, theta around it.
+function wall(f, k, theta, h) {
+  const r = k.flare * Math.pow(Math.max(h,0), k.profile);
+  return add(add(f.apex, mul(f.axis, h)),
+             add(mul(f.e1, r*Math.cos(theta)), mul(f.e2, r*k.aspect*Math.sin(theta))));
 }
 
-// Fabric continuing past the crease, rolling backwards. Past a right angle it
-// presents its reverse side to the camera — that is the dark lobe, generated
-// by the fold rather than drawn.
-function foldFrame(u,k) {
-  const e = 1/512;
-  const c = draped(u,1,k);
-  const tangent = norm(sub(draped(Math.min(u+e,1),1,k), draped(Math.max(u-e,0),1,k)));
-  const down = sub(c, draped(u,1-e,k));
-  const outward = norm(sub(down, tangent.map(t => t*dot(down,tangent))));
-  let normal = norm(cross(tangent,outward));
-  if (normal[2] < 0) normal = normal.map(n=>-n);
-  return { c, tangent, outward, normal };
+// Where the wall meets the cut plane, for each way round the cone. The
+// profile is curved, so this is solved rather than derived.
+function cutHeight(f, k, theta) {
+  const g = (h) => dot(sub(wall(f,k,theta,h), f.cutQ), f.cutN);
+  let lo = 1e-4, hi = k.maxLen;
+  if (g(lo) * g(hi) > 0) return null;         // this ray never crosses the cut
+  for (let i=0;i<40;i++) { const mid=(lo+hi)/2; if (g(lo)*g(mid) <= 0) hi=mid; else lo=mid; }
+  return (lo+hi)/2;
 }
 
-// The fold is a flat turn-back, not a scroll. On a shallow shell the hem
-// creases sharply and the reversed flap lies almost against the body, so its
-// underside faces the camera nearly square-on — a broad dark area with very
-// little depth. A tight roll would present the same fabric edge-on instead,
-// which is why it needed to be enormous to read at all.
-//
-// Crease tightness and how far the flap reaches are therefore separate: a
-// small radius for the crease, an absolute reach for the flat part.
-function foldProfile(u,k) {
-  const s = clamp01((U_HINGE-u)/U_HINGE);
-  return {
-    taper: k.curlEndFrac + (1-k.curlEndFrac)*Math.pow(s, k.curlTaper),
-    phi: k.curlAngle * (k.curlAngleEnd + (1-k.curlAngleEnd)*Math.pow(s, k.curlTaper*0.6)),
-  };
-}
+function buildRestMesh(nt, nv, _unused, k) {
+  const f = coneFrame(k);
+  // A cut steeper than the cone's own flare simply misses some rays — that is
+  // a hyperbolic cut, and it is what gives the mark its long swept tip. Those
+  // rays run to the end of the fabric instead of being treated as a failure.
+  const hCut = new Float32Array(nt);
+  for (let i=0;i<nt;i++) {
+    const h = cutHeight(f, k, (i/nt)*Math.PI*2);
+    hCut[i] = (h === null || !isFinite(h) || h > k.maxLen) ? k.maxLen : h;
+  }
 
-function foldPoint(u,w,k) {
-  const { c, outward, normal } = foldFrame(u,k);
-  const { taper, phi } = foldProfile(u,k);
-  if (taper <= 1e-6) return c;
-  const th = phi * Math.pow(clamp01(w), k.curlEase);
-  const radius = k.curlRadius * taper;
-  const side = cross(outward, normal);
-  const ca = Math.cos(k.curlAxis), sa = Math.sin(k.curlAxis);
-  const sg = k.curlSign;
-  const back = norm([
-    sg*(-normal[0]*ca + side[0]*sa),
-    sg*(-normal[1]*ca + side[1]*sa) + k.curlLift,
-    sg*(-normal[2]*ca + side[2]*sa),
-  ]);
-  const reach = radius*Math.sin(th) + k.foldReach*taper*clamp01(w);
-  const lift  = radius*(1-Math.cos(th));
-  return [
-    c[0] + reach*outward[0] + lift*back[0],
-    c[1] + reach*outward[1] + lift*back[1],
-    c[2] + reach*outward[2] + lift*back[2],
-  ];
-}
-
-function buildRestMesh(nu, nv, nw, k) {
-  const nuFold = Math.max(2, Math.round(U_HINGE*nu));
-  // The artwork's apex is a rounded cap barely a hundredth of the mark wide.
-  // Spread across the grid it becomes a row of near-coincident points, which
-  // is badly conditioned for the solver and makes the top shiver. Welding it
-  // into one real apex costs a fraction of a pixel and steadies everything.
   const APEX = 0;
-  const frontCount = 1 + nv*(nu+1);
-  const backCount = nv*(nu-1);
-  const foldStart = frontCount + backCount;
-  const count = foldStart + (nuFold+1)*nw;
+  const count = 1 + nt*nv;                    // apex welded; theta wraps
   const rest = new Float32Array(count*3), uvs = new Float32Array(count*2);
+  const idx = (i,j) => j===0 ? APEX : 1 + (j-1)*nt + (((i % nt) + nt) % nt);
 
-  const frontIdx = (i,j) => j===0 ? APEX : 1 + (j-1)*(nu+1) + i;
-  const backIdx  = (i,j) => (j===0) ? APEX
-                          : (i===0 || i===nu) ? frontIdx(i,j)
-                          : frontCount + (j-1)*(nu-1) + (i-1);
-  const foldIdx  = (i,w) => w===0 ? frontIdx(i,nv) : foldStart + (w-1)*(nuFold+1) + i;
-
-  const put = (n,p,u,vv) => { rest[n*3]=p[0]; rest[n*3+1]=p[1]; rest[n*3+2]=p[2];
-                              uvs[n*2]=u; uvs[n*2+1]=vv; };
-  put(APEX, draped(0.5, 0, k, false), 0.5, 1);
-  for (let j=1;j<=nv;j++) for (let i=0;i<=nu;i++)
-    put(frontIdx(i,j), draped(i/nu, j/nv, k, false), i/nu, 1-j/nv);
-  for (let j=1;j<=nv;j++) for (let i=1;i<nu;i++)
-    put(backIdx(i,j), draped(i/nu, j/nv, k, true), i/nu, 1-j/nv);
-  for (let w=1;w<=nw;w++) for (let i=0;i<=nuFold;i++)
-    put(foldIdx(i,w), foldPoint(i/nu, w/nw, k), i/nu, -w/nw);
+  const put = (n,p,u,v) => { rest[n*3]=p[0]; rest[n*3+1]=p[1]; rest[n*3+2]=p[2];
+                             uvs[n*2]=u; uvs[n*2+1]=v; };
+  put(APEX, f.apex, 0.5, 1);
+  for (let j=1;j<=nv;j++) for (let i=0;i<nt;i++) {
+    const th = (i/nt)*Math.PI*2, v = j/nv;
+    put(idx(i,j), wall(f, k, th, hCut[i]*v), i/nt, 1-v);
+  }
 
   const tris=[];
-  for (let j=0;j<nv;j++) for (let i=0;i<nu;i++) {
-    const a=frontIdx(i,j), b=frontIdx(i+1,j), c=frontIdx(i+1,j+1), d=frontIdx(i,j+1);
-    const e=backIdx(i,j), f=backIdx(i+1,j), g=backIdx(i+1,j+1), h=backIdx(i,j+1);
-    if (j===0) { tris.push(a,d,c); tris.push(e,g,h); }      // fan into the apex
-    else { tris.push(a,d,c, a,c,b); tris.push(e,g,h, e,f,g); }
-  }
-  for (let w=0;w<nw;w++) for (let i=0;i<nuFold;i++) {
-    const a=foldIdx(i,w), b=foldIdx(i+1,w), c=foldIdx(i+1,w+1), d=foldIdx(i,w+1);
-    tris.push(a,d,c, a,c,b);
+  for (let j=0;j<nv;j++) for (let i=0;i<nt;i++) {
+    const a=idx(i,j), b=idx(i+1,j), c=idx(i+1,j+1), d=idx(i,j+1);
+    // Wound so the outside of the cone faces out; the inside is what the
+    // cavity shading darkens.
+    if (j===0) tris.push(a,c,d); else tris.push(a,c,d, a,b,c);
   }
 
-  // v=0 is the apex the veil hangs from; the hold falls off fast below it.
+  // v=0 is the tip the cone hangs from; the hold falls off fast below it.
   const anchor = new Float32Array(count);
   anchor[APEX] = 1;
   for (let j=1;j<=nv;j++) { const hold=Math.pow(1-j/nv,5);
-    for (let i=0;i<=nu;i++) { anchor[frontIdx(i,j)]=hold; anchor[backIdx(i,j)]=hold; } }
+    for (let i=0;i<nt;i++) anchor[idx(i,j)] = hold; }
 
-  return { rest, uvs, anchor, nu, nv, nw, nuFold, frontCount, backCount, foldStart, count,
-           indices: new Uint32Array(tris), frontIdx, backIdx, foldIdx };
+  return { rest, uvs, anchor, nt, nv, count, foldStart: count,
+           indices: new Uint32Array(tris), idx };
 }
 
 // ===========================================================================
@@ -267,7 +219,7 @@ const SILK = {
   stretch: 2.0e-8,      // XPBD compliance: near zero, silk barely stretches
   shear:   6.0e-7,
   bend:    3.2e-5,      // enough spring to shake creases out instead of keeping them
-  hoop:    4.0e-6,      // keeps the cone's mouth open instead of letting it flatten
+  hoop:    3.0e-7,      // hoops around the cone: stiff, or the walls buckle inward
   thickness: 0.040,     // fabric depth used for self-collision
   drag: 0.06,           // air resistance
   springHome: 58.0,     // stiffness of the pull back to the rest pose
@@ -297,28 +249,18 @@ class Cloth {
   }
 
   #constraints() {
-    const { nu, nv, nw, nuFold, frontIdx, backIdx, foldIdx } = this.m;
+    const { nt, nv, idx } = this.m;
     const a=[], b=[], comp=[];
     const T = this.t;
     const link = (p,q,c) => { if (p!==q) { a.push(p); b.push(q); comp.push(c); } };
-    for (const side of [frontIdx, backIdx]) {
-      for (let j=0;j<=nv;j++) for (let i=0;i<=nu;i++) {
-        const n = side(i,j);
-        if (i<nu) link(n, side(i+1,j), T.stretch);
-        if (j<nv) link(n, side(i,j+1), T.stretch);
-        if (i<nu && j<nv) { link(n, side(i+1,j+1), T.shear); link(side(i+1,j), side(i,j+1), T.shear); }
-        if (i<nu-1) link(n, side(i+2,j), T.bend);
-        if (j<nv-1) link(n, side(i,j+2), T.bend);
-      }
-    }
-    // Hold the cone open: the hem loop resists collapsing front onto back.
-    for (let i=1;i<nu;i++) link(frontIdx(i,nv), backIdx(i,nv), T.hoop);
-    for (let w=0;w<=nw;w++) for (let i=0;i<=nuFold;i++) {
-      const n = foldIdx(i,w);
-      if (i<nuFold && w>0) link(n, foldIdx(i+1,w), T.stretch);   // w=0 belongs to the hem
-      if (w<nw) link(n, foldIdx(i,w+1), T.stretch);
-      if (i<nuFold && w<nw) { link(n, foldIdx(i+1,w+1), T.shear); link(foldIdx(i+1,w), foldIdx(i,w+1), T.shear); }
-      if (w<nw-1) link(n, foldIdx(i,w+2), T.bend);
+    for (let j=0;j<=nv;j++) for (let i=0;i<nt;i++) {
+      const n = idx(i,j);
+      // Around the cone: these are the hoops that keep it from collapsing.
+      if (j>0) link(n, idx(i+1,j), T.hoop);
+      if (j<nv) link(n, idx(i,j+1), T.stretch);
+      if (j>0 && j<nv) { link(n, idx(i+1,j+1), T.shear); link(idx(i+1,j), idx(i,j+1), T.shear); }
+      if (j>0) link(n, idx(i+2,j), T.bend);
+      if (j<nv-1) link(n, idx(i,j+2), T.bend);
     }
     this.ca = Int32Array.from(a); this.cb = Int32Array.from(b);
     this.cc = Float32Array.from(comp);
@@ -532,7 +474,7 @@ const pmrem = new THREE.PMREMGenerator(renderer);
 scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
 scene.environmentIntensity = 0.21;
 
-const mesh = buildRestMesh(46, 30, 9, KNOBS);
+const mesh = buildRestMesh(72, 34, 0, KNOBS);
 const cloth = new Cloth(mesh, SILK);
 
 const geometry = new THREE.BufferGeometry();
@@ -839,7 +781,7 @@ window.__cloak = {
   frameMs: () => lastFrameMs,
   setKnobs(next) {
     Object.assign(KNOBS, next);
-    const m = buildRestMesh(mesh.nu, mesh.nv, mesh.nw, KNOBS);
+    const m = buildRestMesh(mesh.nt, mesh.nv, 0, KNOBS);
     mesh.rest.set(m.rest);
     cloth.pos.set(m.rest); cloth.vel.fill(0);
     geometry.attributes.position.needsUpdate = true;

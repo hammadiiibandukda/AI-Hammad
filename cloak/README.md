@@ -12,39 +12,29 @@ three.js from a CDN, so it needs a connection the first time.
 
 ## The object
 
-The mark is a drawing of a veil thrown over something: **a hollow cone, pinched
-at the apex and open at the hem**, with the bottom-left of the hem rolled
-backwards. The dark `#D0470C` in the flat artwork is not a second colour — it is
-the **inside** of that fold, in shadow.
+A **cone, cut by a plane**. Real elliptical cross-sections about an axis, so
+the cut leaves an actual opening — and the dark in the flat mark is the inside
+of the far wall seen through it, not a fold and not a second colour.
 
-So there is one fabric here and one colour. Everything darker than `#FF6625` on
-screen is the silk shading itself: the fold turns away from the key light, and
-every surface facing away from the camera is the cone's occluded interior. Orbit
-underneath and you can see up into it.
+The cut is allowed to be steeper than the cone's own flare. Where the plane
+misses the wall entirely the fabric simply runs to its end, and that hyperbolic
+cut is what gives the mark its long swept tip.
 
-## How the rest pose stays the logo
-
-Accuracy is built in, not tuned toward:
-
-- The front of the cone is a **Coons patch over the four real boundary curves**
-  of the SVG. Depth is added in **Z only**, which cannot move the silhouette.
-- Depth splits into a centre line both halves share and a bulge that **vanishes
-  at u=0 and u=1**, so the back half meets the front exactly along the
-  silhouette and closes the cone with no seam and no change to the outline.
-- The fold's roll was fitted numerically against the original artwork.
-- The camera is **orthographic on purpose**: under perspective the left tip,
-  which sits well behind the right, would shrink by about 6% and the home view
-  would stop being the logo.
+Everything darker than `#FF6625` on screen is the silk shading itself: the
+interior is occluded and turned away from the key light.
 
 | | |
 |---|---|
-| body silhouette | **99.32%** IoU against the SVG |
-| fold, reading as the dark tone | **55.6%** — see Known limits |
-| overall silhouette | **94.37%** |
-| painted outside the artwork | 0.13% of frame |
-| after a hard throw and 2.6s settle | **93.08%** |
+| body silhouette | **90.7%** IoU against the SVG |
+| dark, reading as the interior tone | **55.9%** |
+| overall silhouette | **88.5%** |
+| after a hard throw and 2.6s settle | **88.7%** |
 | worst self-intersection during a throw | **0.0%** of fabric thickness |
-| depth ÷ width | **0.35**, matching the orthographic reference |
+
+An earlier version scored 98.4% here, but only because its surface was built
+from the SVG's own boundary curves — it matched the drawing by construction
+while not being a cone at all. A real cut cone cannot reproduce those curves
+exactly, so this number is lower and means more.
 
 ## The physics
 
@@ -89,7 +79,12 @@ home. Re-run `verify.mjs` after touching the drape knobs.
 
 ## Known limits
 
-- **The fold and the depth are in tension.** Matched to the reference side
+- **The two references conflict.** Matching the flat mark's outline wants a
+  cone that runs deep — about 1.6 times as deep as it is wide. The reference
+  side view says about 0.35. A straight cut cone cannot satisfy both; the
+  current fit favours the outline. Resolving it needs either a curved cone
+  profile or a decision about which reference wins.
+- **Superseded note, kept for context.** Matched to the reference side
   view the shell is about a third as deep as it is wide, and at that depth
   there simply isn't enough geometry turned away from the camera to fill the
   flat artwork's dark lobe — the fold reads 55.6% instead of the 87% a much
