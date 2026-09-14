@@ -120,6 +120,7 @@ const KNOBS = {
   curlOpen: 0.4943,      // how far the reversed flap reaches past the near side
   curlLift: 0.954, curlAxis: -1.768,
   backDepth: 0.92,     // how far the hidden back of the cone swells behind
+  curlSign: 1,         // +1 rolls the hem away from the viewer, -1 toward it
 };
 
 const clamp01 = x => x<0?0:x>1?1:x;
@@ -183,10 +184,11 @@ function foldPoint(u,w,k) {
   const radius = len / Math.max(phi, 1e-3);
   const side = cross(outward, normal);
   const ca = Math.cos(k.curlAxis), sa = Math.sin(k.curlAxis);
+  const sg = k.curlSign;
   const back = norm([
-    -normal[0]*ca + side[0]*sa,
-    -normal[1]*ca + side[1]*sa + k.curlLift,
-    -normal[2]*ca + side[2]*sa,
+    sg*(-normal[0]*ca + side[0]*sa),
+    sg*(-normal[1]*ca + side[1]*sa) + k.curlLift,
+    sg*(-normal[2]*ca + side[2]*sa),
   ]);
   const reach = radius*Math.sin(th) + k.curlOpen*len*clamp01(w);
   const lift  = radius*(1-Math.cos(th));

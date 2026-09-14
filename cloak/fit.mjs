@@ -37,7 +37,7 @@ await page.evaluate(([w,h,main,dark]) => {
   window.__bufg = window.__buf.getContext('2d', { willReadFrequently:true });
   window.__score = (knobs) => {
     if (knobs) window.__cloak.setKnobs(knobs);
-    window.__cloak.testView(w,h);
+    window.__cloak.homeView(w,h);
     window.__bufg.clearRect(0,0,w,h);
     window.__bufg.drawImage(document.getElementById('stage'),0,0,w,h);
     const d = window.__bufg.getImageData(0,0,w,h).data;
@@ -66,7 +66,7 @@ const objective = (r) => r.back + 0.5*r.sil - 9.0*r.spill - 8.0*Math.max(0, 0.98
 // Stage 2 only: the body's outline is exact by construction, so these knobs
 // exist to shape the crease and the roll, not to buy silhouette accuracy.
 const BOUNDS = {
-  leftBack:[0.05,1.10], leftPow:[1.20,7.00],
+  leftBack:[0.05,1.10], leftPow:[1.20,7.00], backDepth:[0.55,1.30],
   curlLen:[0.25,1.80], curlEndFrac:[0.05,1.00], curlTaper:[0.40,3.20],
   curlAngle:[1.60,5.60], curlAngleEnd:[0.20,1.20], curlEase:[0.25,1.60],
   curlOpen:[0.00,1.40], curlLift:[-1.80,1.80], curlAxis:[-2.80,2.80],
@@ -81,7 +81,7 @@ let bestR = await evalKnobs(best), bestS = objective(bestR);
 console.log(`start   front ${(bestR.front*100).toFixed(1)}  back ${(bestR.back*100).toFixed(1)}  sil ${(bestR.sil*100).toFixed(1)}`);
 
 // Random restarts to find the basin, then shrinking coordinate descent.
-for (let trial=0; trial < (process.argv.includes('--seed') ? 60 : 220); trial++) {
+for (let trial=0; trial < (process.argv.includes('--seed') ? 80 : 260); trial++) {
   const cand = {}; for (const k of KEYS) cand[k] = BOUNDS[k][0] + Math.random()*(BOUNDS[k][1]-BOUNDS[k][0]);
   const r = await evalKnobs(cand), s = objective(r);
   if (s > bestS) { bestS=s; bestR=r; best=cand;
