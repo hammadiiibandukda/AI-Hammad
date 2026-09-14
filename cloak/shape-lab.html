@@ -1,0 +1,437 @@
+<title>Cloak Shape Lab</title>
+<style>
+  :root {
+    --page:#FBF8EF; --panel:#F3EFE2; --line:#E1DCCB;
+    --ink:#130F02; --muted:#7C776A; --accent:#FF550C;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --page:#141410; --panel:#1B1B18; --line:#2D2C26; --ink:#F3EFE2; --muted:#8A857A;
+    }
+  }
+  :root[data-theme="dark"] {
+    --page:#141410; --panel:#1B1B18; --line:#2D2C26; --ink:#F3EFE2; --muted:#8A857A;
+  }
+  html,body { height:100%; margin:0; }
+  body {
+    background:var(--page); color:var(--ink); overflow:hidden;
+    font:400 13px/1.45 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+    -webkit-font-smoothing:antialiased;
+    display:grid; grid-template-columns:1fr 300px;
+  }
+  @media (max-width: 760px) { body { grid-template-columns:1fr; grid-template-rows:1fr auto; } }
+
+  #view { position:relative; min-width:0; min-height:0; }
+  canvas { display:block; width:100%; height:100%; touch-action:none; cursor:grab; }
+  canvas.grabbing { cursor:grabbing; }
+  #ghost {
+    position:absolute; inset:0; margin:auto; pointer-events:none;
+    opacity:.30; mix-blend-mode:multiply; display:none;
+  }
+  :root[data-theme="dark"] #ghost, :root:not([data-theme="light"]) #ghost { mix-blend-mode:screen; }
+  @media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) #ghost { mix-blend-mode:multiply; } }
+  #ghost.on { display:block; }
+
+  #panel {
+    background:var(--panel); border-left:1px solid var(--line);
+    overflow-y:auto; padding:18px 16px 22px; display:flex; flex-direction:column; gap:14px;
+  }
+  @media (max-width: 760px) {
+    #panel { border-left:0; border-top:1px solid var(--line); max-height:46vh; }
+  }
+  h1 { font-size:13px; margin:0; letter-spacing:.01em; }
+  p.lede { margin:0; color:var(--muted); font-size:12px; }
+
+  .group { display:flex; flex-direction:column; gap:9px; }
+  .group h2 {
+    font-size:10px; margin:0; text-transform:uppercase; letter-spacing:.10em;
+    color:var(--muted); font-weight:600;
+  }
+  .row { display:grid; grid-template-columns:1fr auto; gap:2px 8px; align-items:baseline; }
+  .row label { font-size:12px; }
+  .row output { font-variant-numeric:tabular-nums; font-size:11px; color:var(--muted); }
+  .row input { grid-column:1 / -1; width:100%; accent-color:var(--accent); margin:0; }
+
+  .actions { display:flex; gap:8px; flex-wrap:wrap; }
+  button {
+    font:inherit; font-size:12px; padding:7px 11px; border-radius:7px; cursor:pointer;
+    border:1px solid var(--line); background:transparent; color:var(--ink);
+  }
+  button:hover { border-color:var(--muted); }
+  button.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+  button:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+
+  textarea {
+    width:100%; box-sizing:border-box; height:104px; resize:vertical;
+    font:11px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;
+    background:var(--page); color:var(--ink);
+    border:1px solid var(--line); border-radius:7px; padding:8px;
+  }
+  .hint { color:var(--muted); font-size:11px; }
+  @media (prefers-reduced-motion: reduce) { * { transition:none !important; } }
+</style>
+
+<div id="view">
+  <canvas id="stage"></canvas>
+  <svg id="ghost" width="460" height="311" viewBox="72.2972 91.7177 84.8388 57.2823" aria-hidden="true">
+    <path d="M97.2728 149C97.2728 149 72.2972 140.278 77.789 131.071C81.2884 125.256 89.2806 131.555 101.766 137.854L97.2671 149H97.2728Z" fill="#D0470C"/>
+    <path d="M127.746 146.09C146.728 147.541 155.137 139.361 157.136 136.943C157.136 136.943 145.802 123.19 139.125 113.962C134.576 107.679 128.751 98.7473 125.415 93.5611C124.23 91.7177 121.397 91.793 120.189 93.6256C107.794 112.371 84.9689 126.425 79.8496 129.134C83.8965 127.532 91.2791 132.525 101.275 137.856C101.275 137.856 108.697 141.532 113.726 143.236C120.172 145.418 127.752 146.095 127.752 146.095L127.746 146.09Z" fill="#FF6625"/>
+  </svg>
+</div>
+
+<div id="panel">
+  <div class="group">
+    <h1>Cloak Shape Lab</h1>
+    <p class="lede">Drag the shape until it's the object you mean. Then send me the numbers — I'll build exactly that.</p>
+  </div>
+  <div class="group" id="controls"></div>
+  <div class="group">
+    <h2>Hand back</h2>
+    <div class="actions">
+      <button class="primary" id="copy">Copy numbers</button>
+      <button id="ghostBtn">Overlay mark</button>
+      <button id="reset">Reset</button>
+    </div>
+    <textarea id="out" readonly spellcheck="false"></textarea>
+    <div class="hint">Drag the view to orbit · scroll to zoom · double-click to recentre.</div>
+  </div>
+</div>
+
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.186.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.186.0/examples/jsm/"
+} }
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+
+const SEG = {
+  bottomRight: [[127.746,146.09],[146.728,147.541],[155.137,139.361],[157.136,136.943]],
+  rightLower:  [[157.136,136.943],[157.136,136.943],[145.802,123.19],[139.125,113.962]],
+  rightUpper:  [[139.125,113.962],[134.576,107.679],[128.751,98.7473],[125.415,93.5611]],
+  apexCap:     [[125.415,93.5611],[124.23,91.7177],[121.397,91.793],[120.189,93.6256]],
+  leftEdge:    [[120.189,93.6256],[107.794,112.371],[84.9689,126.425],[79.8496,129.134]],
+  hem1:        [[79.8496,129.134],[83.8965,127.532],[91.2791,132.525],[101.275,137.856]],
+  hem2:        [[101.275,137.856],[101.275,137.856],[108.697,141.532],[113.726,143.236]],
+  hem3:        [[113.726,143.236],[120.172,145.418],[127.752,146.095],[127.752,146.095]],
+};
+
+const cubic = (p0,p1,p2,p3,t) => {
+  const m=1-t, a=m*m*m, b=3*m*m*t, c=3*m*t*t, d=t*t*t;
+  return [a*p0[0]+b*p1[0]+c*p2[0]+d*p3[0], a*p0[1]+b*p1[1]+c*p2[1]+d*p3[1]];
+};
+
+// Arc-length parameterised polyline, so grid lines land evenly along the real
+// curve instead of bunching where the beziers are dense.
+function polyline(segs, per = 96) {
+  const pts = [];
+  segs.forEach((s,i) => { for (let k = i===0?0:1; k<=per; k++) pts.push(cubic(s[0],s[1],s[2],s[3],k/per)); });
+  const cum = [0];
+  for (let i=1;i<pts.length;i++) cum.push(cum[i-1] + Math.hypot(pts[i][0]-pts[i-1][0], pts[i][1]-pts[i-1][1]));
+  const total = cum[cum.length-1];
+  return { pts, total, at(s) {
+    const target = Math.min(Math.max(s,0),1) * total;
+    let lo=0, hi=cum.length-1;
+    while (lo < hi-1) { const mid=(lo+hi)>>1; if (cum[mid]<=target) lo=mid; else hi=mid; }
+    const span = cum[hi]-cum[lo], f = span>1e-9 ? (target-cum[lo])/span : 0;
+    return [pts[lo][0]+(pts[hi][0]-pts[lo][0])*f, pts[lo][1]+(pts[hi][1]-pts[lo][1])*f];
+  }};
+}
+const reverse = (segs) => segs.slice().reverse().map(s => [s[3],s[2],s[1],s[0]]);
+
+const TOP    = polyline(reverse([SEG.apexCap]));
+const RIGHT  = polyline(reverse([SEG.rightUpper]).concat(reverse([SEG.rightLower])));
+const LEFT   = polyline([SEG.leftEdge]);
+const BOTTOM = polyline([SEG.hem1, SEG.hem2, SEG.hem3, SEG.bottomRight]);
+const U_HINGE = polyline([SEG.hem1]).total / BOTTOM.total;   // where the crease runs out
+
+const BBOX = { x0:72.2972, y0:91.7177, x1:157.136, y1:149 };
+const CX = (BBOX.x0+BBOX.x1)/2, CY = (BBOX.y0+BBOX.y1)/2;
+const SCALE = 2.0 / (BBOX.x1-BBOX.x0);
+const toWorld = (p) => [(p[0]-CX)*SCALE, -(p[1]-CY)*SCALE];
+const VIEW = { hw:1.0, hh:(BBOX.y1-BBOX.y0)*SCALE/2 };       // frustum matching the viewBox
+
+function coons(u,v) {
+  const t=TOP.at(u), b=BOTTOM.at(u), l=LEFT.at(v), r=RIGHT.at(v);
+  const c00=TOP.at(0), c10=TOP.at(1), c01=BOTTOM.at(0), c11=BOTTOM.at(1);
+  const out=[0,0];
+  for (let i=0;i<2;i++) out[i] = (1-v)*t[i] + v*b[i] + (1-u)*l[i] + u*r[i]
+    - ((1-u)*(1-v)*c00[i] + u*(1-v)*c10[i] + (1-u)*v*c01[i] + u*v*c11[i]);
+  return out;
+}
+
+const KNOBS = {
+  // A real cone, cut by a plane. Cross-sections are ellipses about an axis —
+  // not a front sheet and a back sheet sharing the same x and y — so the cut
+  // leaves an actual opening you can see into, and the dark in the flat mark
+  // is the inside of the far wall seen through it.
+  apexZ: -0.3338,        // where the tip sits in depth
+  tiltX: -0.0034,        // lean toward (+) or away from the viewer
+  tiltZ: -0.0505,       // lean left / right
+  flare: 1.5689,        // how fast the cone widens
+  aspect: 0.6205,       // cross-section depth ÷ width (1 = circular)
+  profile: 1.0679,      // 1 = straight sides, >1 = bell, <1 = horn
+  cutPitch: 0.1468,     // cut plane tipped front-to-back
+  cutRoll: -0.6262,     // ... and side to side
+  cutDrop: 1.6388,      // how far down the axis the cut falls
+  maxLen: 1.2099,        // how much cone there is, where the cut never reaches
+};
+
+const clamp01 = x => x<0?0:x>1?1:x;
+const sub=(a,b)=>[a[0]-b[0],a[1]-b[1],a[2]-b[2]];
+const add=(a,b)=>[a[0]+b[0],a[1]+b[1],a[2]+b[2]];
+const mul=(a,t)=>[a[0]*t,a[1]*t,a[2]*t];
+const cross=(a,b)=>[a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0]];
+const dot=(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
+const norm=(a)=>{const l=Math.hypot(a[0],a[1],a[2])||1; return [a[0]/l,a[1]/l,a[2]/l];};
+
+// The apex is pinned to the artwork's own tip; everything else is free.
+const APEX_XY = toWorld([122.80, 92.30]);
+
+function coneFrame(k) {
+  const apex = [APEX_XY[0], APEX_XY[1], k.apexZ];
+  const axis = norm([Math.sin(k.tiltZ), -Math.cos(k.tiltX)*Math.cos(k.tiltZ), Math.sin(k.tiltX)]);
+  const ref = Math.abs(axis[1]) > 0.95 ? [1,0,0] : [0,1,0];
+  const e1 = norm(cross(axis, ref));     // across the view
+  const e2 = norm(cross(axis, e1));      // into the view
+  const cutN = norm([Math.sin(k.cutRoll), -Math.cos(k.cutPitch)*Math.cos(k.cutRoll), Math.sin(k.cutPitch)]);
+  const cutQ = add(apex, mul(axis, k.cutDrop));
+  return { apex, axis, e1, e2, cutN, cutQ };
+}
+
+// A point on the cone wall: h down the axis, theta around it.
+function wall(f, k, theta, h) {
+  const r = k.flare * Math.pow(Math.max(h,0), k.profile);
+  return add(add(f.apex, mul(f.axis, h)),
+             add(mul(f.e1, r*Math.cos(theta)), mul(f.e2, r*k.aspect*Math.sin(theta))));
+}
+
+// Where the wall meets the cut plane, for each way round the cone. The
+// profile is curved, so this is solved rather than derived.
+function cutHeight(f, k, theta) {
+  const g = (h) => dot(sub(wall(f,k,theta,h), f.cutQ), f.cutN);
+  let lo = 1e-4, hi = k.maxLen;
+  if (g(lo) * g(hi) > 0) return null;         // this ray never crosses the cut
+  for (let i=0;i<40;i++) { const mid=(lo+hi)/2; if (g(lo)*g(mid) <= 0) hi=mid; else lo=mid; }
+  return (lo+hi)/2;
+}
+
+function buildRestMesh(nt, nv, _unused, k) {
+  const f = coneFrame(k);
+  // A cut steeper than the cone's own flare simply misses some rays — that is
+  // a hyperbolic cut, and it is what gives the mark its long swept tip. Those
+  // rays run to the end of the fabric instead of being treated as a failure.
+  const hCut = new Float32Array(nt);
+  for (let i=0;i<nt;i++) {
+    const h = cutHeight(f, k, (i/nt)*Math.PI*2);
+    hCut[i] = (h === null || !isFinite(h) || h > k.maxLen) ? k.maxLen : h;
+  }
+
+  const APEX = 0;
+  const count = 1 + nt*nv;                    // apex welded; theta wraps
+  const rest = new Float32Array(count*3), uvs = new Float32Array(count*2);
+  const idx = (i,j) => j===0 ? APEX : 1 + (j-1)*nt + (((i % nt) + nt) % nt);
+
+  const put = (n,p,u,v) => { rest[n*3]=p[0]; rest[n*3+1]=p[1]; rest[n*3+2]=p[2];
+                             uvs[n*2]=u; uvs[n*2+1]=v; };
+  put(APEX, f.apex, 0.5, 1);
+  for (let j=1;j<=nv;j++) for (let i=0;i<nt;i++) {
+    const th = (i/nt)*Math.PI*2, v = j/nv;
+    put(idx(i,j), wall(f, k, th, hCut[i]*v), i/nt, 1-v);
+  }
+
+  const tris=[];
+  for (let j=0;j<nv;j++) for (let i=0;i<nt;i++) {
+    const a=idx(i,j), b=idx(i+1,j), c=idx(i+1,j+1), d=idx(i,j+1);
+    // Wound so the outside of the cone faces out; the inside is what the
+    // cavity shading darkens.
+    if (j===0) tris.push(a,c,d); else tris.push(a,c,d, a,b,c);
+  }
+
+  // v=0 is the tip the cone hangs from; the hold falls off fast below it.
+  const anchor = new Float32Array(count);
+  anchor[APEX] = 1;
+  for (let j=1;j<=nv;j++) { const hold=Math.pow(1-j/nv,5);
+    for (let i=0;i<nt;i++) anchor[idx(i,j)] = hold; }
+
+  return { rest, uvs, anchor, nt, nv, count, foldStart: count,
+           indices: new Uint32Array(tris), idx };
+}
+
+// ===========================================================================
+// Scene — one cut cone, lit the way the real thing is lit
+// ===========================================================================
+
+const canvas = document.getElementById('stage');
+const view = document.getElementById('view');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias:true });
+renderer.shadowMap.enabled = true;
+renderer.toneMapping = THREE.NoToneMapping;
+
+const pageColor = () => getComputedStyle(document.documentElement).getPropertyValue('--page').trim() || '#FBF8EF';
+const applyGround = () => renderer.setClearColor(new THREE.Color(pageColor()), 1);
+applyGround();
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyGround);
+new MutationObserver(applyGround).observe(document.documentElement, { attributeFilter:['data-theme'] });
+
+const scene = new THREE.Scene();
+const pmrem = new THREE.PMREMGenerator(renderer);
+scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+scene.environmentIntensity = 0.21;
+
+const material = new THREE.MeshPhysicalMaterial({
+  color: new THREE.Color('#FF6625'), roughness: 0.56, metalness: 0,
+  sheen: 1, sheenColor: new THREE.Color('#FFCDB4'), sheenRoughness: 0.34,
+  side: THREE.DoubleSide, shadowSide: THREE.DoubleSide, envMapIntensity: 0.5,
+});
+// Anything facing away from the camera is the inside of the cone, which sees
+// far less of the room than the outside does.
+material.onBeforeCompile = (sh) => {
+  sh.uniforms.uDark = { value: 1.0 };
+  sh.uniforms.uTint = { value: new THREE.Color('#C03806') };
+  sh.fragmentShader = 'uniform float uDark;\nuniform vec3 uTint;\n' +
+    sh.fragmentShader.replace('#include <color_fragment>',
+      `#include <color_fragment>
+       if (!gl_FrontFacing) diffuseColor.rgb = mix(diffuseColor.rgb * uDark, uTint, 0.55);`);
+};
+
+const geometry = new THREE.BufferGeometry();
+const cloak = new THREE.Mesh(geometry, material);
+cloak.castShadow = cloak.receiveShadow = true;
+scene.add(cloak);
+
+const key = new THREE.DirectionalLight(0xFFF1E4, 2.55);
+key.position.set(-2.4, 3.2, 2.8);
+key.castShadow = true;
+key.shadow.mapSize.set(1024,1024);
+key.shadow.camera.left=-2.4; key.shadow.camera.right=2.4;
+key.shadow.camera.top=2.4;   key.shadow.camera.bottom=-2.4;
+key.shadow.bias=-0.0006; key.shadow.normalBias=0.018;
+scene.add(key, key.target);
+scene.add(new THREE.DirectionalLight(0xF0E4E0, 0.26).translateX(3));
+scene.add(new THREE.HemisphereLight(new THREE.Color('#FFF3E6'), new THREE.Color('#7A2600'), 0.34));
+
+const camera = new THREE.OrthographicCamera(-1,1,1,-1,0.1,100);
+camera.position.set(0,0,6);
+const controls = new OrbitControls(camera, canvas);
+controls.enableDamping = true; controls.dampingFactor = 0.06;
+controls.minZoom = 0.3; controls.maxZoom = 6;
+
+function resize() {
+  const w = view.clientWidth, h = view.clientHeight;
+  if (!w || !h) return;
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+  renderer.setSize(w, h, false);
+  const aspect = w/h, half = 1.35;
+  const hw = aspect > 1 ? half*aspect : half;
+  const hh = aspect > 1 ? half : half/aspect;
+  camera.left=-hw; camera.right=hw; camera.top=hh; camera.bottom=-hh;
+  camera.updateProjectionMatrix();
+  const g = document.getElementById('ghost');
+  const px = (2*Math.min(hw,hh*1.481)) ;                     // world units across
+  g.style.width = (w * (2.0/(2*hw))) + 'px';                 // the mark is 2 world units wide
+  g.style.height = (g.clientWidth * (0.675/1.0)) + 'px';
+}
+new ResizeObserver(resize).observe(view);
+
+// ===========================================================================
+// Controls
+// ===========================================================================
+
+const SPEC = [
+  ['Cone', [
+    ['flare',    0.20, 3.00, 0.01, 'how fast it widens'],
+    ['profile',  0.50, 2.60, 0.01, 'straight sides ↔ bell'],
+    ['aspect',   0.10, 1.20, 0.01, 'depth ÷ width'],
+    ['maxLen',   0.60, 3.20, 0.01, 'how much cone there is'],
+  ]],
+  ['Lean', [
+    ['tiltX',   -1.00, 1.00, 0.01, 'toward / away from you'],
+    ['tiltZ',   -0.80, 0.80, 0.01, 'left / right'],
+    ['apexZ',   -0.60, 0.60, 0.01, 'tip depth'],
+  ]],
+  ['Cut', [
+    ['cutPitch', -1.55, 1.55, 0.01, 'tipped front to back'],
+    ['cutRoll',  -1.55, 1.55, 0.01, 'tipped side to side'],
+    ['cutDrop',   0.15, 2.60, 0.01, 'how far down it cuts'],
+  ]],
+  ['Orientation', [
+    ['rotX', -3.14, 3.14, 0.01, 'pitch the whole object'],
+    ['rotY', -3.14, 3.14, 0.01, 'yaw'],
+    ['rotZ', -3.14, 3.14, 0.01, 'roll'],
+  ]],
+];
+
+const STATE = { ...KNOBS, rotX:0, rotY:0, rotZ:0 };
+const DEFAULTS = { ...STATE };
+const outputs = {};
+
+const panel = document.getElementById('controls');
+for (const [title, rows] of SPEC) {
+  const g = document.createElement('div'); g.className = 'group';
+  g.innerHTML = `<h2>${title}</h2>`;
+  for (const [name, min, max, step, note] of rows) {
+    const row = document.createElement('div'); row.className = 'row';
+    const id = 'k_' + name;
+    row.innerHTML =
+      `<label for="${id}" title="${note}">${name}</label><output id="o_${name}"></output>` +
+      `<input id="${id}" type="range" min="${min}" max="${max}" step="${step}" value="${STATE[name] ?? 0}">`;
+    g.appendChild(row);
+    const input = row.querySelector('input');
+    outputs[name] = row.querySelector('output');
+    input.addEventListener('input', () => { STATE[name] = +input.value; rebuild(); });
+  }
+  panel.appendChild(g);
+}
+
+function syncReadout() {
+  for (const k in outputs) outputs[k].textContent = (+STATE[k]).toFixed(2);
+  const keep = {};
+  for (const [, rows] of SPEC) for (const [n] of rows) keep[n] = +(+STATE[n]).toFixed(4);
+  document.getElementById('out').value = JSON.stringify(keep, null, 2);
+}
+
+function rebuild() {
+  const m = buildRestMesh(72, 34, 0, STATE);
+  geometry.setAttribute('position', new THREE.BufferAttribute(m.rest, 3));
+  geometry.setAttribute('uv', new THREE.BufferAttribute(m.uvs, 2));
+  geometry.setIndex(new THREE.BufferAttribute(m.indices, 1));
+  geometry.computeVertexNormals();
+  geometry.computeBoundingSphere();
+  cloak.rotation.set(STATE.rotX, STATE.rotY, STATE.rotZ);
+  syncReadout();
+}
+
+document.getElementById('copy').addEventListener('click', async (e) => {
+  const text = document.getElementById('out').value;
+  try { await navigator.clipboard.writeText(text); e.target.textContent = 'Copied'; }
+  catch { document.getElementById('out').select(); e.target.textContent = 'Select & copy'; }
+  setTimeout(()=>{ e.target.textContent = 'Copy numbers'; }, 1600);
+});
+document.getElementById('ghostBtn').addEventListener('click', (e) => {
+  const on = document.getElementById('ghost').classList.toggle('on');
+  e.target.textContent = on ? 'Hide mark' : 'Overlay mark';
+});
+document.getElementById('reset').addEventListener('click', () => {
+  Object.assign(STATE, DEFAULTS);
+  for (const [, rows] of SPEC) for (const [n] of rows) {
+    const el = document.getElementById('k_'+n); if (el) el.value = STATE[n];
+  }
+  camera.position.set(0,0,6); controls.target.set(0,0,0); camera.zoom = 1;
+  camera.updateProjectionMatrix(); controls.update();
+  rebuild();
+});
+canvas.addEventListener('dblclick', () => {
+  camera.position.set(0,0,6); controls.target.set(0,0,0); camera.zoom = 1;
+  camera.updateProjectionMatrix(); controls.update();
+});
+canvas.addEventListener('pointerdown', ()=>canvas.classList.add('grabbing'));
+addEventListener('pointerup', ()=>canvas.classList.remove('grabbing'));
+
+resize(); rebuild(); controls.update();
+(function loop(){ requestAnimationFrame(loop); controls.update(); renderer.render(scene, camera); })();
+</script>
