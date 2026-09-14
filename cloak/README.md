@@ -56,6 +56,23 @@ iterating one big step and gives stiffness that doesn't drift with resolution.
 About 2,900 particles. Solver and normals cost ~8ms of CPU per frame; drawing is
 GPU-cheap.
 
+## The reference loader
+
+`reference-loader.json` is Cloaked's own Lottie loader, and it is the best
+reference we have for the object: 45 frames at 24fps of the mark turning.
+
+What it says, measured (`measref.mjs`, `playref.mjs`, `cmpref.mjs`):
+
+- **It disagrees with the static SVG.** Its rest frame matches the supplied
+  mark at only **81.6%** IoU, and it has **no dark lobe at all** — the whole
+  mark is one orange, filled `#FF6625` and `#FF550C`, with `#FBF8EF` used as
+  a cutting shape. There is no `#D0470C` anywhere in it.
+- **The motion is:** 16 frames at rest, an anticipation swell to +23% area,
+  a turn through frames 24-33, then a settle back over frames 34-44.
+- **At its thinnest the silhouette is 29% of the rest area and 56% of the
+  rest width** — which is a direct measurement of the object's depth, the
+  quantity every earlier version had to invent.
+
 ## Running the checks
 
 ```sh
