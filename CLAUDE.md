@@ -2,6 +2,7 @@
 
 **For:** Hammad Bandukda · design lead, Cloaked (contractor)
 **Role of this doc:** the context I (Claude) load to act as your standing support partner — for everyday design/marketing work *and* the tough, ambiguous, multi-system tasks. Drop it into the working directory (rename to `CLAUDE.md` to auto-load). Keep it current; it's the source of truth between sessions.
+**Companion docs:** [`ADS.md`](./ADS.md) — paid & organic advertising (Meta, Google, LinkedIn, OOH, social): benchmarks, placement mix, creative rules, copy patterns, measurement gaps. Load it for any ad work.
 
 ---
 
@@ -133,6 +134,13 @@ Be a colleague who can carry a task end-to-end across your whole stack — resea
 - Built a matching card per feature (clone-based, icon-swapped) in a clean row on the "Components + Styles" page — QA'd complete, no overlaps.
 - **Open decisions:** keep/drop the extra **Password Management** card (not a nav feature); resolve **naming drift** (my carousel names vs nav's official names); **Data Removal has no dedicated icon** (collides with Family Sharing on `Group`).
 - **Nav copy bugs to fix:** Data Removal subtitle "120+ data brokers" (stale); Dark web & SSN monitoring subtitle is a wrong paste from Data Removal.
+
+**Ads — paid & organic** — see [`ADS.md`](./ADS.md) *(no MAR ticket yet)*
+- Consumer Meta is the big one: ~$285K/day, blended CAC **$172**. Google ~$53K/day. LinkedIn enterprise ~$28.6K/mo at **$1,508/lead** via ScalixAI. OOH live in Boston + Dallas via Conferra.
+- **Spam calls is the strongest message across every channel** — best non-brand Google CPA ($114) and the best LinkedIn hook ever run ("I get 15–20 spam calls a day", 6.23% CTR, $0.57 CPC).
+- Design for **9:16 Facebook Reels first** — Reels is ~55% of Meta spend and FB beats IG on every comparable slot.
+- Primary ads Figma file: **Marketing Board** `8LWQOqTh7kIMmF0UDn4BLE`.
+- Known broken: Meta sync paused in PostHog · LinkedIn Ads not connected at all · enterprise form has no UTMs and is bot-spammed. See ADS.md §11.
 
 **Promo popups** (Figma, this session)
 - Exit-intent **modal** (`Desktop - 1`, Aura-style: dark panel, Simula headline, orange app-mockup, discount seal) and compact bottom-left **coupon toast** (`Desktop - 2`, Incogni-style: "Get X% off … Use code: CLOAKED_BLOG"). Both closes the blog exit-intent gap on MAR-241.
