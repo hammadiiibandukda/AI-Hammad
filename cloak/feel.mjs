@@ -14,6 +14,11 @@ await p.route('https://cdn.jsdelivr.net/**', r=>r.fulfill({contentType:'text/jav
   body: fs.readFileSync(path.join(HERE,'vendor', path.basename(new URL(r.request().url()).pathname)),'utf8')}));
 await p.goto('file://'+path.join(HERE,'cloak.html'));
 await p.waitForFunction('window.__cloak!==undefined',null,{timeout:20000});
+await p.waitForFunction('!window.__cloak.flying()', null, {timeout:40000});   // let the entrance land
+// Measure idle once it has truly settled from the entrance, not while the
+// landing is still dying away. Simulated seconds, so a slow frame can't cut it short.
+const landed = await p.evaluate(()=>window.__cloak.clock());
+await p.waitForFunction(`window.__cloak.clock() >= ${landed + 5}`, null, {polling:'raf', timeout:60000});
 if (process.argv[3]) console.log('  tune', JSON.stringify(await p.evaluate((k)=>{ const r = window.__cloak.tune(k); return { constraints: r.constraints, ...k }; }, JSON.parse(process.argv[3]))));
 await p.waitForTimeout(1500);
 

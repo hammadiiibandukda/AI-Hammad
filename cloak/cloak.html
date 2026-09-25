@@ -18,7 +18,7 @@
 </style>
 
 <canvas id="stage"></canvas>
-<div id="hint">grab it and fly it &nbsp;·&nbsp; orbit the empty space &nbsp;·&nbsp; right-drag to pan &nbsp;·&nbsp; double-click to reset</div>
+<div id="hint">grab it and fly it &nbsp;·&nbsp; orbit the empty space &nbsp;·&nbsp; right-drag to pan &nbsp;·&nbsp; double-click to reset &nbsp;·&nbsp; R to fly it in again</div>
 <svg id="fallback" width="420" height="284" viewBox="72.2972 91.7177 84.8388 57.2823" aria-label="Cloaked">
   <path d="M97.2728 149C97.2728 149 72.2972 140.278 77.789 131.071C81.2884 125.256 89.2806 131.555 101.766 137.854L97.2671 149H97.2728Z" fill="#D0470C"/>
   <path d="M127.746 146.09C146.728 147.541 155.137 139.361 157.136 136.943C157.136 136.943 145.802 123.19 139.125 113.962C134.576 107.679 128.751 98.7473 125.415 93.5611C124.23 91.7177 121.397 91.793 120.189 93.6256C107.794 112.371 84.9689 126.425 79.8496 129.134C83.8965 127.532 91.2791 132.525 101.275 137.856C101.275 137.856 108.697 141.532 113.726 143.236C120.172 145.418 127.752 146.095 127.752 146.095L127.746 146.09Z" fill="#FF6625"/>
@@ -197,6 +197,10 @@ class Cloth {
     this.#regions();
     this.#collisionBuffers();
     this.homeScale = 1;
+    // Where the home spring pulls. Normally the rest pose itself; during the
+    // entrance it's the rest pose carried along the flight path.
+    this.target = this.rest;
+    this.collide = true;          // switched off only to untangle; see the loop
   }
 
   #constraints() {
@@ -394,6 +398,7 @@ class Cloth {
   }
 
   #solveCollisions() {
+    if (!this.collide) return;
     const { pos, pa, pb, psep, pairCount, held } = this;
     for (let c=0;c<pairCount;c++) {
       const i=pa[c], j=pb[c], p=i*3, q=j*3, sep=psep[c];
@@ -434,7 +439,7 @@ class Cloth {
     if (!(dt > 0)) return;
     const T = this.t, sub = T.substeps, h = dt/sub, h2 = h*h;
     const kBase = (dragging ? T.springHeld : T.springHome) * this.homeScale;
-    const { pos, prev, vel, force, rest, held, kScale, n } = this;
+    const { pos, prev, vel, force, target, held, kScale, n } = this;
     for (let s=0;s<sub;s++) {
       this.lambda.fill(0);          // XPBD multipliers are per-substep
       for (let i=0;i<n;i++) {
@@ -445,7 +450,7 @@ class Cloth {
           const idx = m3+a;
           // Spring home plus its damper, wind, and a little air resistance.
           const accel = force[idx]
-            + k*(rest[idx]-pos[idx]) - c*vel[idx] - T.drag*vel[idx]*Math.abs(vel[idx]);
+            + k*(target[idx]-pos[idx]) - c*vel[idx] - T.drag*vel[idx]*Math.abs(vel[idx]);
           vel[idx] += accel*h*(1-hold);
           prev[idx] = pos[idx];
           pos[idx] += vel[idx]*h*(1-hold);
@@ -461,6 +466,13 @@ class Cloth {
     }
     this.force.fill(0);
   }
+
+  // Forget the patch rotations carried over from the last motion. A patch
+  // that's nearly a straight strip can't tell how far it's been twisted about
+  // its own length, so after a big turn it keeps a stale twist that the
+  // fabric then settles into. Starting over from the rest orientation when a
+  // motion ends lets it come home clean.
+  resetFrames() { const Q = this.rQuat; Q.fill(0); for (let r = 0; r < this.n; r++) Q[r*4+3] = 1; }
 
   // Re-read the compliances after the tuning object has changed.
   retune() { for (const [start, n, key] of this.groups) this.cc.fill(this.t[key], start, start + n); }
@@ -712,6 +724,7 @@ canvas.addEventListener('pointerdown', (ev) => {
   geometry.computeBoundingSphere();
   const hit = ray.intersectObject(cloak, false)[0];
   if (!hit) return;                               // empty space: leave it to the orbit
+  if (intro.active) endIntro();                   // caught mid-flight: it's yours now
   hitPoint.copy(hit.point);
   grabPoint.copy(hit.point);
   dragPoint.copy(hit.point);
@@ -753,6 +766,7 @@ const release = () => {
   if (!dragging) return;
   dragging = false;
   cloth.held.fill(0);
+  cloth.resetFrames();
   grabbed = [];
   controls.enabled = true;
   canvas.classList.remove('grabbing');
@@ -772,6 +786,73 @@ canvas.addEventListener('dblclick', () => {
 
 const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
 let last = performance.now(), frozen = false, lastFrameMs = 0;
+let touching = 0;                 // seconds the released carpet has been touching itself
+const UNTANGLE_AFTER = 0.8;
+
+// ===========================================================================
+// 5a · The entrance — the cloak flies in
+//
+// Only the target is animated: the rest pose, carried along a swooping arc
+// from off-screen, turning from edge-on to face-on as it lands. The fabric
+// follows it on its own physics — the tip is held hardest, so it leads, and
+// the hem trails behind and billows against the air. The path is scripted;
+// every ripple in the cloak is not.
+// ===========================================================================
+
+const ENTRANCE = {
+  duration: 2.6,                  // seconds from off-screen to landed
+  delay: 0.15,                    // a beat of empty page first
+  // Offsets from home, as a cubic Bézier: in from the upper left and slightly
+  // behind, swooping low toward the viewer, past centre, rising into place.
+  path: [[-2.9, 1.8, -0.8], [-1.1, -1.4, 0.7], [1.3, -0.4, 0.3], [0, 0, 0]],
+  turn: [0.3, -1.0, 0.5],         // starting attitude, radians: banked and edge-on
+  loose: 0.32,                    // home spring while flying, as a share of normal: loose, so it trails
+  flutter: 4.0,                   // extra ripple while flying, fading on landing
+};
+
+const intro = {
+  active: false, clock: 0,        // seconds of simulated flight, so a slow frame can't outrun the physics
+  pivot: new THREE.Vector3(...[0,1,2].map(c => mesh.rest[mesh.tip*3+c])),
+  from: new THREE.Quaternion().setFromEuler(new THREE.Euler(...ENTRANCE.turn)),
+  q: new THREE.Quaternion(), v: new THREE.Vector3(), target: new Float32Array(mesh.count*3),
+};
+const easeOut = x => 1 - Math.pow(1 - x, 3);
+const easeInOut = x => x < 0.5 ? 4*x*x*x : 1 - Math.pow(-2*x + 2, 3)/2;
+const smooth = (a, b, x) => { const t = Math.min(Math.max((x-a)/(b-a), 0), 1); return t*t*(3-2*t); };
+
+function bezier(t) {
+  const [a, b, c, d] = ENTRANCE.path, m = 1 - t;
+  return [0,1,2].map(i => m*m*m*a[i] + 3*m*m*t*b[i] + 3*m*t*t*c[i] + t*t*t*d[i]);
+}
+
+// Place the target — and, at the start, the cloak itself — at progress p.
+function placeIntro(p) {
+  const off = bezier(easeOut(p));
+  intro.q.copy(intro.from).slerp(new THREE.Quaternion(), easeInOut(Math.min(p / 0.85, 1)));
+  const R = mesh.rest, T = intro.target, pv = intro.pivot;
+  for (let i = 0; i < mesh.count; i++) {
+    intro.v.set(R[i*3]-pv.x, R[i*3+1]-pv.y, R[i*3+2]-pv.z).applyQuaternion(intro.q);
+    T[i*3]   = pv.x + intro.v.x + off[0];
+    T[i*3+1] = pv.y + intro.v.y + off[1];
+    T[i*3+2] = pv.z + intro.v.z + off[2];
+  }
+  cloth.target = T;
+  cloth.homeScale = ENTRANCE.loose + (1 - ENTRANCE.loose) * smooth(0.55, 1.0, p);
+}
+
+function startIntro() {
+  if (reduced) return;
+  intro.active = true;
+  intro.clock = -ENTRANCE.delay;
+  placeIntro(0);
+  cloth.pos.set(intro.target); cloth.prev.set(intro.target); cloth.vel.fill(0);
+}
+
+function endIntro() {
+  intro.active = false;
+  cloth.target = cloth.rest;
+  cloth.homeScale = 1;
+}
 
 function frame(now) {
   if (!reduced) requestAnimationFrame(frame);
@@ -781,6 +862,13 @@ function frame(now) {
 
   if (!frozen) {
     const t = now/1000;
+    let flutter = 1;
+    intro.clock += dt;
+    if (intro.active) {
+      const p = intro.clock / ENTRANCE.duration;
+      if (p >= 1) { endIntro(); cloth.resetFrames(); }   // landed
+      else { placeIntro(Math.max(p, 0)); flutter = 1 + ENTRANCE.flutter * (1 - smooth(0.4, 1.0, Math.max(p, 0))); }
+    }
     if (!reduced) {
       // Hovering: a slow ripple running from the tip down to the hem, pushing
       // along the surface normal so the carpet undulates rather than drifts,
@@ -791,7 +879,7 @@ function frame(now) {
       const swellY = (Math.sin(t*0.57)*0.8 + Math.cos(t*0.31)*0.35) * 0.35;
       for (let i=0;i<mesh.count;i++) {
         const n=i*3, free = 1 - mesh.anchor[i];
-        const ripple = CARPET.wave * free * Math.sin(k*mesh.along[i] - w*t);
+        const ripple = CARPET.wave * flutter * free * Math.sin(k*mesh.along[i] - w*t);
         force[n]   += swellX + Nm[n]*ripple;
         force[n+1] += swellY + Nm[n+1]*ripple;
         force[n+2] +=          Nm[n+2]*ripple;
@@ -833,7 +921,16 @@ function frame(now) {
 
     // A settled carpet cannot be inside itself, so the broad phase only earns
     // its cost while something is actually moving.
-    if (dragging || cloth.energy() > 0.004) cloth.buildPairs(); else cloth.pairCount = 0;
+    if (dragging || intro.active || cloth.energy() > 0.004) cloth.buildPairs(); else cloth.pairCount = 0;
+
+    // Untangling. The rest pose never touches itself, so a carpet that keeps
+    // touching itself once it's been let go is tangled — and self-collision,
+    // which normally keeps it clean, is exactly what stops it finding its way
+    // back. So after a moment of that, let it pass through itself until it's
+    // clear, then turn collision back on. It always gets home.
+    if (dragging || intro.active) { touching = 0; cloth.collide = true; }
+    else if (cloth.pairCount > 0) { touching += dt; if (touching > UNTANGLE_AFTER) cloth.collide = false; }
+    else { touching = 0; cloth.collide = true; }
     cloth.step(dt, dragging);
     updateRender();
   }
@@ -848,7 +945,11 @@ if (reduced) {
   controls.update();
   renderer.render(scene, camera);
 } else {
+  startIntro();
   requestAnimationFrame(frame);
+  addEventListener('keydown', (ev) => {
+    if (ev.key === 'r' || ev.key === 'R') { cloth.held.fill(0); startIntro(); }
+  });
   setTimeout(() => { if (!interacted) document.getElementById('hint').classList.add('gone'); }, 11000);
 }
 
@@ -856,7 +957,8 @@ if (reduced) {
 window.__cloak = {
   homeView(px, py, keepState) {
     frozen = true;
-    if (!keepState) { cloth.pos.set(cloth.rest); cloth.vel.fill(0); }
+    if (intro.active && !keepState) endIntro();
+    if (!keepState) { cloth.pos.set(cloth.rest); cloth.vel.fill(0); cloth.resetFrames(); }
     updateRender();
     renderer.setPixelRatio(1); renderer.setSize(px, py, false);
     canvas.style.width = px+'px'; canvas.style.height = py+'px';
@@ -884,6 +986,16 @@ window.__cloak = {
     }
   },
   thaw() { frozen = false; },
+  flyIn(overrides) {
+    frozen = false;
+    if (overrides) { Object.assign(ENTRANCE, overrides); intro.from.setFromEuler(new THREE.Euler(...ENTRANCE.turn)); }
+    startIntro();
+    return ENTRANCE.delay + ENTRANCE.duration;
+  },
+  flying: () => intro.active,
+  clock: () => intro.clock,       // simulated seconds since the last fly-in began its flight
+  untangling: () => !cloth.collide,
+  _cloth: cloth,                  // for checks that need to stub the solver
   tune(next) { Object.assign(CARPET, next); cloth.retune(); return { ...CARPET, constraints: cloth.ca.length }; },
   setZoom(z) { camera.zoom = z; camera.updateProjectionMatrix(); renderer.render(scene, camera); },
   profile(n) {

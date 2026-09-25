@@ -9,6 +9,8 @@ three.js from a CDN, so it needs a connection the first time.
 - **Drag the empty space** to orbit, right-drag to pan, scroll to zoom,
   double-click to reset the view.
 - Leave it alone and it eases back to the mark and levitates there.
+- **It flies in** when the page opens. Press **R** to watch it again; grab it
+  mid-flight and it's yours.
 
 ## The object
 
@@ -80,7 +82,30 @@ fabric is a thick carpet, not silk:
   rest pose, so letting go eases it back — the whole carpet moving as one
   piece — rather than snapping it.
 - **Self-collision** via a spatial hash, so layers never pass through each
-  other.
+  other — with one exception, below.
+
+**The entrance.** Only the target is scripted: the rest pose, carried along
+a swooping Bézier arc from off-screen upper left, turning from banked and
+edge-on to face-on as it lands, about the tip. The fabric follows on its own
+physics with the home spring loosened to a third, so the tip leads, the hem
+trails, and the hovering ripple runs up to five times harder in the air and
+fades out on the approach. 0.15s of empty page, 2.6s of flight. The flight
+runs on simulated time, so a slow frame slows the flight and the fabric
+together rather than leaving the carpet behind its path.
+
+**Untangling.** The rest pose never touches itself, so a carpet that keeps
+touching itself for 0.8s after it's been let go is tangled — and
+self-collision is exactly what would stop it finding its way back. So it
+lets the layers pass through each other until they're clear, then turns
+collision back on. It always gets home. Never while held or in flight.
+
+**Coming home clean.** Each shape-matching patch remembers its rotation from
+the last step, which is what makes it cheap. But a patch that's nearly a
+straight strip can't tell how far it's been twisted about its own length, so
+after a big turn — the entrance, a hard swing — it keeps a stale twist that
+the fabric settles into. The patches forget their rotations when the carpet
+lands or is let go. Without that, the carpet sat 1.3% off the mark with a
+6° fold three seconds after the fly-in; with it, 0.3% and no fold.
 
 Measured with `feel.mjs` on the same mesh, swinging it around in a loop by
 its wing:
@@ -99,7 +124,8 @@ see.)
 | | |
 |---|---|
 | vertices / triangles | 481 / 864, as modelled |
-| after a big drag, 3s on | within 1.2% of its width of rest |
+| after a big drag, 3s on | within 0.5% of its width of rest |
+| after the fly-in, 3s on | within 0.3% |
 | worst self-intersection during a throw | **0.0%** of its thickness |
 | CPU per frame | ~7ms here (solver, collision, shell) |
 
@@ -127,6 +153,8 @@ What it says, measured (`measref.mjs`, `playref.mjs`, `cmpref.mjs`):
 node feel.mjs [tag] [json] # how carpet-like: crease and roughness, idle and swinging
 node settle.mjs [json]     # how it comes home after a big drag
 node interact.mjs          # real pointer drag and release
+node intro.mjs [json]      # film the fly-in: stays sound in the air, lands home
+node untangle.mjs          # the untangling safeguard switches off and back on
 node motion.mjs            # throw it, check it's stable and stays out of itself
 node perf.mjs              # where the frame time goes
 node ortho.mjs             # front / back / side views through the real scene
@@ -136,8 +164,9 @@ node verify.mjs            # silhouette against the flat SVG — informational
 node playref.mjs           # play the Lottie loader frame by frame
 ```
 
-`feel.mjs` and `settle.mjs` take a JSON object of `CARPET` overrides, so a
-setting can be tried without editing the page.
+`feel.mjs` and `settle.mjs` take a JSON object of `CARPET` overrides, and
+`intro.mjs` one of `ENTRANCE` overrides, so a setting can be tried without
+editing the page.
 
 ## Tuning
 
@@ -151,6 +180,10 @@ Everything about how it moves is in `CARPET`:
 - `springHome`, `damping` — how it comes home; `springHeld` — how freely it
   flies while held.
 - `render` — how thick it looks; `thickness` — how close layers may come.
+
+The fly-in is in `ENTRANCE`: `duration`, `delay`, the `path` (Bézier
+offsets from home), the starting `turn`, how `loose` the spring is in the
+air, and the extra `flutter`.
 
 The form itself belongs to the Blender file.
 

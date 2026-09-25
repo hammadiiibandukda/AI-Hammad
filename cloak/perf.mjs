@@ -9,6 +9,7 @@ await p.route('https://cdn.jsdelivr.net/**', r=>r.fulfill({contentType:'text/jav
   body: fs.readFileSync(path.join(HERE,'vendor',path.basename(new URL(r.request().url()).pathname)),'utf8')}));
 await p.goto('file://'+path.join(HERE,'cloak.html'));
 await p.waitForFunction('window.__cloak!==undefined',null,{timeout:20000});
+await p.waitForFunction('!window.__cloak.flying()', null, {timeout:40000});   // let the entrance land
 await p.waitForTimeout(1500);
 console.log('verts/tris:', await p.evaluate(()=>JSON.stringify(window.__cloak.stats)));
 console.log('idle  frame', (await p.evaluate(()=>window.__cloak.frameMs())).toFixed(1)+'ms',
