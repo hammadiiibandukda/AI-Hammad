@@ -29,10 +29,13 @@ await p.waitForTimeout(350); await snap('released');
 await p.waitForTimeout(2600);
 await snap('settled');
 const after = await p.evaluate(()=>window.__cloak.energy());
+const off = await p.evaluate(()=>window.__cloak.offHome());
 console.log(`energy while dragged ${dragged.toFixed(4)} -> 3s after release ${after.toFixed(4)}`);
 console.log(dragged > 0.02 ? 'drag moved the cloth' : 'WARNING: drag had no effect');
-console.log(`idle energy is ${idle.toFixed(4)} (the levitation drift)`);
-console.log(`settled to ${(after/idle).toFixed(1)}x idle` + (after < idle*3 ? '  — returned to rest' : '  — WARNING: did not return'));
+// A carpet is meant to come home unhurried, so the bar is "looks home":
+// on average within 2.5% of its width of the rest pose, three seconds on.
+console.log(`3s after release: on average ${(off*100).toFixed(1)}% of its width from rest` +
+            (off < 0.025 ? '  — home' : '  — WARNING: not home yet'));
 
 const strip = await ctx.newPage();
 await strip.setViewportSize({width:1300,height:250});

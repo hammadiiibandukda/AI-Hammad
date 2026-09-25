@@ -2,10 +2,11 @@
 //
 //   node bake-mesh.mjs [model.glb] [--subdiv N]
 //
-// Welds the vertices Blender splits at seams (cloth needs connectivity),
-// optionally midpoint-subdivides for finer wrinkles — which cannot move the
-// surface, since every new point lies on an existing flat triangle — then
-// centres it and scales it to the width the scene is framed for.
+// Welds the vertices Blender splits at seams (the simulation needs
+// connectivity), then centres it and scales it to the width the scene is
+// framed for. Leave it as modelled: the carpet wants a coarse mesh, since
+// fine resolution only gives it somewhere to wrinkle. --subdiv N midpoint-
+// subdivides (which cannot move the surface) if a finer mesh is ever wanted.
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -13,7 +14,7 @@ import { fileURLToPath } from 'node:url';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
 const src = args.find(a => a.endsWith('.glb')) || path.join(HERE, 'reference-logo.glb');
-const subdiv = +(args[args.indexOf('--subdiv') + 1] ?? 1) || (args.includes('--subdiv') ? 0 : 1);
+const subdiv = args.includes('--subdiv') ? Math.max(0, parseInt(args[args.indexOf('--subdiv') + 1], 10) || 0) : 0;
 
 // ---- read the glb --------------------------------------------------------
 const buf = fs.readFileSync(src);
