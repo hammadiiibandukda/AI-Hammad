@@ -12,49 +12,64 @@ three.js from a CDN, so it needs a connection the first time.
 
 ## The object
 
-A **cone, cut by a plane**. Real elliptical cross-sections about an axis, so
-the cut leaves an actual opening — and the dark in the flat mark is the inside
-of the far wall seen through it, not a fold and not a second colour.
+Modelled in Blender from the mark itself (`reference-logo.glb`) and used as
+the cloth's rest pose directly — nothing about the form is generated or
+guessed here.
 
-The cut is allowed to be steeper than the cone's own flare. Where the plane
-misses the wall entirely the fabric simply runs to its end, and that hyperbolic
-cut is what gives the mark its long swept tip.
+It is **one open sheet**, not a closed surface: rolled 207° around the apex
+— a little over half a turn — and twisted down its length. The left edge
+curls back under itself, and the dark lobe in the flat artwork is the inside
+of that curl. The right edge runs out into the long wing. Seen from above
+it's a teardrop; from the side, a narrow blade with the curl looping
+underneath. About a quarter as deep as it is wide.
 
-Everything darker than `#FF6625` on screen is the silk shading itself: the
-interior is occluded and turned away from the key light.
+Every earlier version in this repo's history modelled a closed surface of
+one kind or another, which is why none of them read right.
 
-| | |
-|---|---|
-| body silhouette | **90.7%** IoU against the SVG |
-| dark, reading as the interior tone | **55.9%** |
-| overall silhouette | **88.5%** |
-| after a hard throw and 2.6s settle | **88.7%** |
-| worst self-intersection during a throw | **0.0%** of fabric thickness |
+There is one fabric and one colour. Everything darker than `#FF6625` on
+screen is the silk shading itself: the inside of the sheet is occluded and
+turned away from the key light.
 
-An earlier version scored 98.4% here, but only because its surface was built
-from the SVG's own boundary curves — it matched the drawing by construction
-while not being a cone at all. A real cut cone cannot reproduce those curves
-exactly, so this number is lower and means more.
+### Updating the model
+
+Re-export from Blender as `.glb`, then:
+
+```sh
+node bake-mesh.mjs path/to/model.glb            # one subdivision, the default
+node bake-mesh.mjs path/to/model.glb --subdiv 0 # as modelled
+```
+
+It welds the vertices Blender splits at seams (cloth needs connectivity),
+midpoint-subdivides for finer wrinkles — which can't move the surface, as
+every new point lies on an existing flat triangle — centres it, scales it to
+the frame, and embeds it in `cloak.html`. The page stays one file.
+
+Keep the front facing +Z in Blender's export (the default), and the
+topology manifold. Grid Fill gives the solver what it wants.
 
 ## The physics
 
-Substepped **XPBD** — six substeps, one solve each — which is far steadier than
-iterating one big step and gives stiffness that doesn't drift with resolution.
+Substepped **XPBD** — six substeps, one solve each — running on the model's
+own topology: stretch along every edge, bending across every pair of
+triangles that share one. No grid assumed, so it takes whatever comes out
+of Blender.
 
-- **No gravity.** Home is a critically damped spring back to the rest pose, so
-  releasing the silk eases it home rather than snapping it, and the whole sheet
-  is free to be flown around in the meantime. It settles in well under a second.
-- **Self-collision** via a counting-sort spatial hash, rebuilt once a frame and
-  resolved on every substep. Near neighbours in the weave are excluded — they
-  are already held by distance constraints — so only genuinely separate pieces
-  of cloth are candidates, which is what keeps the pair list short.
-- **Hoop constraints** across the hem stop the cone's mouth collapsing.
-- The **apex is welded** to a single point. The artwork's apex is a rounded cap
-  barely a hundredth of the mark wide; spread across the grid it becomes a row
-  of near-coincident points that makes the top shiver.
+- **No gravity.** Home is a critically damped spring back to the rest
+  pose, so releasing the silk eases it home rather than snapping it, and the
+  whole sheet is free to be flown around in the meantime. The hold is
+  strongest at the tip and falls off quickly down the sheet.
+- **Self-collision** via a counting-sort spatial hash, rebuilt once a frame
+  and resolved on every substep. Near neighbours in the weave are excluded —
+  distance constraints already hold those — so only genuinely separate
+  pieces of cloth are candidates.
 
-About 2,900 particles. Solver and normals cost ~8ms of CPU per frame; drawing is
-GPU-cheap.
+| | |
+|---|---|
+| vertices / triangles | 1,825 / 3,456 (481 as modelled, one subdivision) |
+| settles after a hard throw | ~0.8s |
+| worst self-intersection during a throw | **0.0%** of fabric thickness |
+| returns to its rest pose | within 1% |
+| CPU per frame | ~5ms (solver, collision, normals) |
 
 ## The reference loader
 
@@ -76,41 +91,30 @@ What it says, measured (`measref.mjs`, `playref.mjs`, `cmpref.mjs`):
 ## Running the checks
 
 ```sh
-./fetch-vendor.sh          # local three.js, so the scripts run offline
-node verify.mjs            # rest pose vs the original SVG
-node overlay.mjs           # writes out-overlay.png — artwork beside a colour-coded diff
-node look2.mjs             # home + orbit views, and the measured interior colour
-node motion.mjs            # throw it, trace the settle, confirm it lands back on the logo
+./fetch-vendor.sh          # local three.js + addons, so the scripts run offline
+node lookglb.mjs           # render reference-logo.glb from nine angles
+node ortho.mjs             # front / back / side views through the real scene
+node motion.mjs            # throw it, trace the settle, check it comes home
 node interact.mjs          # real pointer drag and release
 node perf.mjs              # where the frame time goes
-node fit.mjs [--seed]      # re-fit the fold knobs; writes fitted-knobs.json
+node verify.mjs            # silhouette against the flat SVG — informational
+node playref.mjs           # play the Lottie loader frame by frame
 ```
 
 ## Tuning
 
-`KNOBS` shapes the rest pose — `depth`, `bulgePow` and `leftBack` set the drape,
-`backDepth` the hidden half, everything starting `curl` the rolled hem. `SILK`
-is the fabric: XPBD compliances (lower is stiffer), `thickness` for
+`SILK` is the fabric: XPBD compliances (lower is stiffer), `thickness` for
 self-collision, and `springHome` / `springHeld` / `damping` for how it comes
-home. Re-run `verify.mjs` after touching the drape knobs.
+home and how freely it flies while held. The form itself belongs to the
+Blender file.
 
 ## Known limits
 
-- **The two references conflict.** Matching the flat mark's outline wants a
-  cone that runs deep — about 1.6 times as deep as it is wide. The reference
-  side view says about 0.35. A straight cut cone cannot satisfy both; the
-  current fit favours the outline. Resolving it needs either a curved cone
-  profile or a decision about which reference wins.
-- **Superseded note, kept for context.** Matched to the reference side
-  view the shell is about a third as deep as it is wide, and at that depth
-  there simply isn't enough geometry turned away from the camera to fill the
-  flat artwork's dark lobe — the fold reads 55.6% instead of the 87% a much
-  deeper scroll reached. The reference front view shows a smaller dark lip
-  than the SVG does, so the open question is which of the two is the target:
-  the flat mark, or the drawn object. If it is the flat mark, the rest of the
-  darkness has to come from shadow rather than from turned-away geometry.
-- The lit body measures about `#FB7142` against the brand's `#FF6625`, and the
-  fold interior about `#A2472B` against `#D0470C`. The two-tone reading is
-  right; the exact values are a lighting judgement, not a fit.
-- Two colours are not reconciled with the live site, which sometimes renders the
-  brand orange as `#FF7A00`. This uses `#FF6625` from the supplied icon.
+- The model's front view matches the flat SVG at about 80% silhouette IoU.
+  That's a comparison of two references, not an error: the model is the
+  source of truth for the form now, and the SVG is a flat drawing of it.
+- The lit silk reads close to `#FF6625` but not exactly, and the inside of
+  the curl close to the artwork's `#D0470C` rather than on it — a lighting
+  judgement, not a fit.
+- Two colours are not reconciled with the live site, which sometimes renders
+  the brand orange as `#FF7A00`. This uses `#FF6625` from the supplied icon.
