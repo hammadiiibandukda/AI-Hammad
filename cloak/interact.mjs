@@ -26,8 +26,11 @@ for (let i=1;i<=12;i++) { await p.mouse.move(560-i*22, 430-i*16); await p.waitFo
 await snap('dragged');
 const dragged = await p.evaluate(()=>window.__cloak.energy());
 await p.mouse.up();
-await p.waitForTimeout(350); await snap('released');
-await p.waitForTimeout(2600);
+// Simulated seconds from here: a slow headless frame slows the physics too.
+const let_go = await p.evaluate(()=>window.__cloak.clock());
+const at = (s) => p.waitForFunction(`window.__cloak.clock() >= ${let_go + s}`, null, {polling:'raf', timeout:60000});
+await at(0.35); await snap('released');
+await at(3);
 await snap('settled');
 const after = await p.evaluate(()=>window.__cloak.energy());
 const off = await p.evaluate(()=>window.__cloak.offHome());

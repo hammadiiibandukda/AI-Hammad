@@ -22,6 +22,10 @@ await p.waitForFunction(`window.__cloak.clock() >= ${landed + 5}`, null, {pollin
 if (process.argv[3]) console.log('  tune', JSON.stringify(await p.evaluate((k)=>{ const r = window.__cloak.tune(k); return { constraints: r.constraints, ...k }; }, JSON.parse(process.argv[3]))));
 await p.waitForTimeout(1500);
 
+// Wait for s seconds of simulation from now, however long that takes here.
+const later = async (s) => { const t = await p.evaluate(()=>window.__cloak.clock()) + s;
+  await p.waitForFunction(`window.__cloak.clock() >= ${t}`, null, {polling:'raf', timeout:60000}); };
+
 const sample = async (n, gap) => {
   const out = [];
   for (let i=0;i<n;i++) { out.push(await p.evaluate(()=>window.__cloak.feel())); await p.waitForTimeout(gap); }
@@ -41,19 +45,19 @@ const during = [];
 for (let i=0;i<28;i++) {
   const a = i/28 * Math.PI * 2;
   await p.mouse.move(600 - 170*Math.sin(a) - i*3, 420 - 150*(1-Math.cos(a))*0.6);
-  await p.waitForTimeout(34);
+  await later(1/30);                         // one step per 1/30s of simulation
   if (i % 3 === 0) during.push(await p.evaluate(()=>window.__cloak.feel()));
   if (i === 9 || i === 18) await snap('swinging ' + (i===9?'1':'2'));
 }
 await snap('held');
 await p.mouse.up();
-await p.waitForTimeout(260); await snap('let go');
+await later(0.26); await snap('let go');
 const drag = {
   creaseMax: Math.max(...during.map(o=>o.creaseMax)),
   creaseP95: during.reduce((s,o)=>s+o.creaseP95,0)/during.length,
   roughness: during.reduce((s,o)=>s+o.roughness,0)/during.length,
 };
-await p.waitForTimeout(2200); await snap('settled');
+await later(2.2); await snap('settled');
 const after = await p.evaluate(()=>({ e: window.__cloak.energy(), ov: window.__cloak.overlap() }));
 
 const f = (o) => `crease max ${o.creaseMax.toFixed(1).padStart(5)}°   crease p95 ${o.creaseP95.toFixed(1).padStart(5)}°   roughness ${o.roughness.toFixed(2)}`;

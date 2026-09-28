@@ -26,9 +26,12 @@ await p.evaluate(()=>{
 // A real tangle holds the carpet away from rest, so keep it stirred the way
 // being stuck would. Headless frames are slow and dt is capped, so give the
 // switch simulated time rather than wall-clock time.
-const stir = async (ms) => { for (let t=0; t<ms; t+=150) { await p.evaluate(()=>window.__cloak.poke(0.25)); await p.waitForTimeout(150); } };
-await stir(300);   console.log('touching, early  ', JSON.stringify(await st()), ' <- still colliding');
-await stir(2600);  console.log('touching, later  ', JSON.stringify(await st()), ' <- should be untangling');
+const clock = () => p.evaluate(()=>window.__cloak.clock());
+const until = (t) => p.waitForFunction(`window.__cloak.clock() >= ${t}`, null, {polling:'raf', timeout:60000});
+const stir = async (s) => { const end = await clock() + s;
+  for (let t = await clock(); t < end; t += 0.15) { await p.evaluate(()=>window.__cloak.poke(0.25)); await until(Math.min(t + 0.15, end)); } };
+await stir(0.3);   console.log('touching, early  ', JSON.stringify(await st()), ' <- still colliding');
+await stir(1.2);   console.log('touching, later  ', JSON.stringify(await st()), ' <- should be untangling');
 await p.evaluate(()=>{ const c = window.__cloak._cloth; c.buildPairs = c._realPairs; });
-await p.waitForTimeout(500);  console.log('clear again      ', JSON.stringify(await st()), ' <- colliding again');
+await until(await clock() + 0.5);  console.log('clear again      ', JSON.stringify(await st()), ' <- colliding again');
 await b.close();
