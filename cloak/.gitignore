@@ -4,3 +4,4 @@ fitted-knobs.json
 _lookglb.html
 __pycache__/
 blender/frames/
+*.blend1
