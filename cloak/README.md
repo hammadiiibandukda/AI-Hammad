@@ -157,6 +157,43 @@ see.)
 | worst self-intersection during a throw | **0.0%** of its thickness |
 | CPU per frame | ~7ms here (solver, collision, shell) |
 
+## The Blender reference
+
+`blender/` holds the fly-in simulated as real cloth in Blender — what the
+page's live simulation is tuned against. It runs the page's own mesh (read
+out of `cloak.html`), along the page's path, with the page's timing, camera,
+lights and colour, so the two can be compared point for point.
+
+Only the tip is steered: it's pinned to the path. Everything else is
+Blender's cloth solver — no gravity, self-collision on, air damping, and the
+body held to the logo pose by goal springs that are loose in the air (0.3)
+and firm up over the approach (15), the same ramp the page uses. The carpet
+is bending stiffness 300 (past leather) with 40 solver steps a frame; a
+stiff cloth with too few steps goes unstable and creases.
+
+One thing that matters: the self-collision gap has to be smaller than the
+spacing of the thin triangles at the tip. At 0.012 the solver pushed them
+apart into permanent dents along the right edge; at 0.004 it lands clean.
+
+```sh
+python blender/flyin.py                       # simulate; writes the files below
+python blender/flyin.py '{"render": "preview"}'   # ... and render every frame
+node blender/compare.mjs [frames_dir]          # the page against it, moment by moment
+```
+
+It needs Blender as a Python module: `pip install bpy==4.5.14` on Python
+3.11. It writes `flyin-positions.bin` (every vertex, every frame, page
+coordinates), `flyin.pc2` (the same motion as a point cache Blender's Mesh
+Cache modifier plays) and `cloak_flyin.blend` — open that in Blender: the
+`Cloak` object is the live cloth sim, `Cloak (baked)` plays the cache back.
+
+| | |
+|---|---|
+| frames | 121 at 30fps — 0.15s of empty page, 2.6s of flight, 1.25s to settle |
+| sharpest fold in flight | 47° (page: 6°) |
+| after landing | within 0.1% of the logo pose, sharpest fold about 10° |
+| page against it in flight | up to 1.4 widths apart: the page runs about half a second behind its own path |
+
 ## The reference loader
 
 `reference-loader.json` is Cloaked's own Lottie loader, and it is the best
