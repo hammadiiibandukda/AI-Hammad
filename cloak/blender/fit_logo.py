@@ -6,10 +6,12 @@
 # (in the plane of the screen only — depth is left alone) that lines both up,
 # and writes the result as a new rest pose next to this file.
 #
-#   python fit_logo.py [logo.svg]
+#   python fit_logo.py [logo.svg]            fit, and write rest-fitted.json
+#   python fit_logo.py --apply [logo.svg]    ... and put the fitted pose in cloak.html
 #
-# Needs numpy, scipy and Pillow. Writes rest-fitted.json (same layout as the
-# mesh embedded in cloak.html) and fit-logo.png (before and after).
+# Always fits from the model as it came out of Blender, so running it again
+# after --apply gives the same answer. Needs numpy, scipy and Pillow. Also
+# writes out-fit-logo.png (before and after, over the logo).
 
 import base64, json, math, os, re, sys
 import numpy as np
@@ -18,9 +20,10 @@ from scipy.interpolate import RBFInterpolator
 from scipy.spatial import cKDTree
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-SVG = sys.argv[1] if __name__ == '__main__' and len(sys.argv) > 1 else os.path.join(HERE, '..', 'logo.svg')
+ARGS = [a for a in sys.argv[1:] if not a.startswith('--')] if __name__ == '__main__' else []
+SVG = ARGS[0] if ARGS else os.path.join(HERE, '..', 'logo.svg')
 sys.path.insert(0, HERE)
-from flyin import load_page_mesh   # noqa: E402  (bpy is imported there but unused here)
+from flyin import load_page_mesh, PAGE   # noqa: E402  (bpy is imported there but unused here)
 
 PX = 400                     # pixels per rest unit when drawing either one
 WIN = (-1.2, 1.2, -0.9, 0.9) # the window both are drawn in, rest units
@@ -161,8 +164,20 @@ def fit(src_sets, dst_sets, rounds=(3e-1, 1e-1, 3e-2, 1e-2, 3e-3, 1e-3, 3e-4), i
     return warp
 
 
+def apply_to_page(fitted, svg_name):
+    """Put the fitted pose in the page, keeping the model as modelled beside it."""
+    html = open(PAGE, encoding='utf-8').read()
+    m = re.search(r'(<script type="application/json" id="logo-mesh">)(.*?)(</script>)', html, re.S)
+    data = json.loads(m.group(2))
+    data.setdefault('modelled', data['positions'])
+    data['positions'] = base64.b64encode(fitted.astype('<f4').tobytes()).decode()
+    data['fittedTo'] = svg_name
+    html = html[:m.start(2)] + json.dumps(data, separators=(',', ':')) + html[m.end(2):]
+    open(PAGE, 'w', encoding='utf-8').write(html)
+
+
 def main():
-    rest, tris, source = load_page_mesh()
+    rest, tris, source = load_page_mesh(modelled=True)
     logo = logo_to_rest(svg_paths(SVG))
     target = draw_logo(logo)
     before = draw_model(rest, tris)
@@ -196,6 +211,9 @@ def main():
            'before': {k: round(float(v), 4) for k, v in s0.items()},
            'after': {k: round(float(v), 4) for k, v in s1.items()}}
     json.dump(out, open(os.path.join(HERE, 'rest-fitted.json'), 'w'))
+    if '--apply' in sys.argv:
+        apply_to_page(fitted, os.path.basename(SVG))
+        print('cloak.html now runs the fitted pose')
 
     # Before and after, over the logo: grey agrees, magenta is cloak where the
     # logo is empty, cyan is logo the cloak misses, yellow is face/inside mixed up.

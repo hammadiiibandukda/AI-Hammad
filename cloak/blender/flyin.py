@@ -58,10 +58,14 @@ SETTINGS = {
 }
 
 
-def load_page_mesh():
+def load_page_mesh(modelled=False):
+    """The mesh embedded in cloak.html. Once fit_logo.py has been applied the
+    page runs the fitted pose; modelled=True gives the model as it came out of
+    Blender instead."""
     html = open(PAGE, encoding='utf-8').read()
     data = json.loads(re.search(r'<script type="application/json" id="logo-mesh">(.*?)</script>', html, re.S).group(1))
-    rest = np.frombuffer(base64.b64decode(data['positions']), dtype='<f4').reshape(-1, 3).copy()
+    key = 'modelled' if modelled and 'modelled' in data else 'positions'
+    rest = np.frombuffer(base64.b64decode(data[key]), dtype='<f4').reshape(-1, 3).copy()
     tris = np.frombuffer(base64.b64decode(data['indices']), dtype='<u4' if data.get('wide') else '<u2').reshape(-1, 3).astype(int)
     return rest, tris, data.get('source', '?')
 
@@ -256,10 +260,11 @@ def stage(scene, S, rest):
     fabric('Carpet', S['face'], S['sheen'])
     fabric('Lining', S['lining'], 0.0)
 
-    # Orthographic, head-on, framed like a 960x600 page.
+    # Orthographic, head-on, framed like a 960x600 page (VIEW in cloak.html,
+    # with its 1.3 margin).
     cam_data = bpy.data.cameras.new('Camera')
     cam_data.type = 'ORTHO'
-    cam_data.ortho_scale = 2 * 0.675 * 1.30 * (960 / 600)
+    cam_data.ortho_scale = 2 * 0.7086 * 1.30 * (960 / 600)
     cam = bpy.data.objects.new('Camera', cam_data)
     centre = (rest.min(axis=0) + rest.max(axis=0)) / 2
     cam.location = to_blender(centre) + Vector((0, -6, 0))

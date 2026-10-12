@@ -2,7 +2,7 @@
 // model's depth can be compared against it directly rather than guessed at.
 import { chromium } from '/opt/node22/lib/node_modules/playwright/index.mjs';
 import path from 'node:path'; import fs from 'node:fs';
-const HERE='/home/user/AI-Hammad/cloak'; const W=520, H=Math.round(520*0.675/1.0);  // artwork aspect
+const HERE='/home/user/AI-Hammad/cloak'; const W=520, H=Math.round(520*0.7086/1.0);  // the logo's aspect, as drawn
 const knobs = process.argv[2] ? JSON.parse(process.argv[2]) : null;
 const tag = process.argv[3] || '';
 

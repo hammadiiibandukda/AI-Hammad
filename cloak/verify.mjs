@@ -1,24 +1,24 @@
-// Renders the frozen rest pose through the artwork's own viewBox and diffs it
-// against the original SVG, so "the logo is accurate" is a number, not a view.
+// Renders the frozen rest pose through the logo's own bounds and diffs it
+// against logo.svg, so "the logo is accurate" is a number, not a view.
 import { chromium } from '/opt/node22/lib/node_modules/playwright/index.mjs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import fs from 'node:fs';
+import { loadLogo, hex } from './logo.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const W = 848, H = 573;                       // viewBox 84.8388 x 57.2823, x10
-const VIEWBOX = '72.2972 91.7177 84.8388 57.2823';
-const MAIN = 'M127.746 146.09C146.728 147.541 155.137 139.361 157.136 136.943C157.136 136.943 145.802 123.19 139.125 113.962C134.576 107.679 128.751 98.7473 125.415 93.5611C124.23 91.7177 121.397 91.793 120.189 93.6256C107.794 112.371 84.9689 126.425 79.8496 129.134C83.8965 127.532 91.2791 132.525 101.275 137.856C101.275 137.856 108.697 141.532 113.726 143.236C120.172 145.418 127.752 146.095 127.752 146.095L127.746 146.09Z';
-const DARK = 'M97.2728 149C97.2728 149 72.2972 140.278 77.789 131.071C81.2884 125.256 89.2806 131.555 101.766 137.854L97.2671 149H97.2728Z';
+const LOGO = loadLogo();
+const W = 848, H = Math.round(W * LOGO.box.h / LOGO.box.w);
 
-const REF_HTML = `<body style="margin:0"><svg width="${W}" height="${H}" viewBox="${VIEWBOX}" shape-rendering="crispEdges">
-<rect x="0" y="0" width="234" height="234" fill="#FBF8EF"/>
-<path d="${DARK}" fill="#D0470C"/><path d="${MAIN}" fill="#FF6625"/></svg></body>`;
+const REF_HTML = `<body style="margin:0"><svg width="${W}" height="${H}" viewBox="${LOGO.viewBox}" shape-rendering="crispEdges">
+<rect x="${LOGO.box.x - 10}" y="${LOGO.box.y - 10}" width="${LOGO.box.w + 20}" height="${LOGO.box.h + 20}" fill="#FBF8EF"/>
+<path d="${LOGO.lining.d}" fill="${LOGO.lining.fill}"/><path d="${LOGO.face.d}" fill="${LOGO.face.fill}"/></svg></body>`;
 
+const [FACE, LINING] = [hex(LOGO.face.fill), hex(LOGO.lining.fill)];
 const classify = (buf, i) => {
   const r = buf[i], g = buf[i+1], b = buf[i+2];
   const d = (cr,cg,cb) => (r-cr)**2 + (g-cg)**2 + (b-cb)**2;
-  const page = d(0xFB,0xF8,0xEF), front = d(0xFF,0x66,0x25), back = d(0xD0,0x47,0x0C);
+  const page = d(0xFB,0xF8,0xEF), front = d(...FACE), back = d(...LINING);
   if (page <= front && page <= back) return 0;
   return front <= back ? 1 : 2;
 };
@@ -72,7 +72,7 @@ await page.screenshot({ path: shotPath, clip:{x:0,y:0,width:W,height:H} });
 const gotBuf = await sharpless(fs.readFileSync(shotPath));
 
 const r = compare(gotBuf, refBuf);
-console.log(`silhouette IoU ${(r.silhouette*100).toFixed(2)}%   front ${(r.front*100).toFixed(2)}%   back(fold) ${(r.back*100).toFixed(2)}%   spill ${r.spillPct.toFixed(2)}%`);
+console.log(`silhouette IoU ${(r.silhouette*100).toFixed(2)}%   face ${(r.front*100).toFixed(2)}%   inside of the curl ${(r.back*100).toFixed(2)}%   spill ${r.spillPct.toFixed(2)}%`);
 
 // Overlay: green = agree, magenta = we painted where the artwork is empty,
 // cyan = the artwork has ink we are missing.

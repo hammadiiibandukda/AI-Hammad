@@ -18,9 +18,13 @@ three.js from a CDN, so it needs a connection the first time.
 
 ## The object
 
-Modelled in Blender from the mark itself (`reference-logo.glb`) and used as
-the cloth's rest pose directly — nothing about the form is generated or
-guessed here.
+Modelled in Blender from the mark itself (`reference-logo.glb`), then fitted
+to the logo (`logo.svg`) so that head-on it *is* the logo — nothing about the
+form is generated or guessed here. The fit only moves points in the plane of
+the screen (2.8% of the width on average), never in depth; see
+[the Blender reference](#the-blender-reference). Head-on, the page's rest
+pose matches the logo at 98.9% on the outline, 98.8% on the face and 96.9%
+on the inside of the curl (`verify.mjs`).
 
 It is **one open sheet**, not a closed surface: rolled 207° around the apex
 — a little over half a turn — and twisted down its length. The left edge
@@ -33,25 +37,29 @@ Every earlier version in this repo's history modelled a closed surface of
 one kind or another, which is why none of them read right.
 
 It's drawn with real thickness — a face, a back, and a cut edge — rebuilt
-from the simulated surface every frame. There is one fabric and one colour:
-everything darker than `#FF6625` on screen is shading. The back of the
-carpet is the inside of the curl, occluded and turned away from the key
-light.
+from the simulated surface every frame. The face is the logo's orange
+`#FF550C` and the back is an ink lining, `#130F02`, which is what the logo
+shows in the curl — and what shows whenever the carpet turns over in flight.
+Sheen, glare and room light are kept low so the lit face reads as the
+logo's orange: `#FF561B` head-on, the lining `#0C0904`.
 
 ### Updating the model
 
 Re-export from Blender as `.glb`, then:
 
 ```sh
-node bake-mesh.mjs path/to/model.glb   # as modelled — what the carpet wants
-node meshcheck.mjs                     # triangle quality of what's baked in
+node bake-mesh.mjs path/to/model.glb      # as modelled — what the carpet wants
+python blender/fit_logo.py --apply        # fit it to logo.svg head-on
+node meshcheck.mjs                        # triangle quality of what's baked in
 ```
 
 It welds the vertices Blender splits at seams (the simulation needs
 connectivity), centres it, scales it to the frame, and embeds it in
 `cloak.html`, so the page stays one file. Leave it unsubdivided: a carpet
 doesn't want fine resolution, which would only give it somewhere to wrinkle.
-`--subdiv N` exists if that ever changes.
+`--subdiv N` exists if that ever changes. The fit keeps the model as
+modelled beside the fitted pose in the same block, and always fits from it,
+so running it twice gives the same answer.
 
 Keep the front facing +Z in Blender's export (the default), and the topology
 manifold.
@@ -134,12 +142,12 @@ carpet sat 1.3% off the mark with a 6° fold three seconds after the fly-in;
 with it, 0.3% and no fold. (Easing them back all the time instead squashed
 the curl at the start of a fast drag.)
 
-Measured with `feel.mjs` on the same mesh, swinging it around in a loop by
+Measured with `feel.mjs` (silk on the model as modelled, carpet on the fitted pose), swinging it around in a loop by
 its wing:
 
 | | silk (before) | carpet (now) |
 |---|---|---|
-| sharpest fold between two faces | **151°** | **24°** |
+| sharpest fold between two faces | **151°** | **18°** |
 | 1 in 20 folds sharper than | 40° | 4° |
 | roughness while swinging | 0.05 | 0.01 |
 | roughness at idle — the jiggle | 0.03 | 0.01–0.02 |
@@ -208,7 +216,7 @@ Cache modifier plays) and `cloak_flyin.blend` — open that in Blender: the
 | rendered colour, lit face / inside | `#FF5118` / `#18130D` (logo: `#FF550C` / `#130F02`) |
 | sharpest fold in flight | 34° (page: 6°) |
 | page against it in flight | up to 1.4 widths apart: the page runs about half a second behind its own path |
-| page against it at rest | 2.8% apart — the page hasn't taken the fitted pose yet |
+| page against it at rest | 0.2% apart — the same fitted pose |
 
 ## The reference loader
 
@@ -242,7 +250,7 @@ node perf.mjs              # where the frame time goes
 node ortho.mjs             # front / back / side views through the real scene
 node lookglb.mjs           # render reference-logo.glb from nine angles
 node meshcheck.mjs         # triangle quality of the baked mesh
-node verify.mjs            # silhouette against the flat SVG — informational
+node verify.mjs            # head-on against logo.svg: outline, face, inside of the curl
 node playref.mjs           # play the Lottie loader frame by frame
 ```
 
@@ -279,12 +287,14 @@ The form itself belongs to the Blender file.
 
 ## Known limits
 
-- The page still runs the model as modelled, which matches the logo at
-  about 80% head-on in its own check (`verify.mjs`, against the original
-  SVG). The Blender reference runs the pose fitted to `logo.svg`; moving the
-  page onto it is the next step.
-- The lit face reads close to `#FF6625` but not exactly, and the inside of
-  the curl close to the artwork's `#D0470C` rather than on it — a lighting
-  judgement, not a fit.
-- Two colours are not reconciled with the live site, which sometimes renders
-  the brand orange as `#FF7A00`. This uses `#FF6625` from the supplied icon.
+- In flight the page still runs about half a second behind its own path,
+  where the Blender reference keeps the tip on it; matching that motion is
+  the next step.
+- The lit face reads `#FF561B` against the logo's `#FF550C`, and the lining
+  `#0C0904` against `#130F02` — as close as lighting a 3D surface allows,
+  and it varies as the carpet turns.
+- Both SVGs' viewBoxes were taken from the curves' control points, not the
+  drawn shape, so the logo's true proportions (1.417 wide to 1 tall) are
+  used for framing, not the viewBox.
+- The live site sometimes renders the brand orange as `#FF7A00`; this uses
+  `#FF550C` from `logo.svg`.
