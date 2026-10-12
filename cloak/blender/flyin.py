@@ -47,7 +47,11 @@ SETTINGS = {
     # Self-collision gap. Keep it under the spacing of the thin triangles at
     # the tip, or the solver pushes them apart into dents (0.012 did).
     'self_distance': 0.004, 'collision_quality': 3,
-    # Look, matching the page.
+    # The rest pose: 'fitted' lines up with the logo head-on (fit_logo.py),
+    # 'page' is the model exactly as the page has it.
+    'rest': 'fitted',
+    # Look: the logo's colours, orange outside and ink inside.
+    'face': '#FF550C', 'lining': '#130F02', 'key': 3.6, 'sheen': 0.15, 'specular': 0.15,
     'thickness': 0.012,
     'smooth': 0,               # subdivision at render time; 2 rounds the curl off the logo
     'render': None,            # None · 'preview' · 'final'
@@ -60,6 +64,18 @@ def load_page_mesh():
     rest = np.frombuffer(base64.b64decode(data['positions']), dtype='<f4').reshape(-1, 3).copy()
     tris = np.frombuffer(base64.b64decode(data['indices']), dtype='<u4' if data.get('wide') else '<u2').reshape(-1, 3).astype(int)
     return rest, tris, data.get('source', '?')
+
+
+def load_rest(S):
+    """The rest pose to simulate: the page's mesh, or the same mesh fitted to
+    the logo head-on by fit_logo.py."""
+    rest, tris, source = load_page_mesh()
+    fitted = os.path.join(HERE, 'rest-fitted.json')
+    if S.get('rest') == 'fitted' and os.path.exists(fitted):
+        data = json.load(open(fitted))
+        rest = np.frombuffer(base64.b64decode(data['positions']), dtype='<f4').reshape(-1, 3).copy()
+        source += ' fitted to ' + data['fitted_to']
+    return rest, tris, source
 
 
 # Page coordinates are Y up and face +Z; Blender's are Z up and face -Y.
@@ -101,7 +117,7 @@ def build(S):
     scene.use_gravity = False
     scene.gravity = (0, 0, 0)
 
-    rest, tris, source = load_page_mesh()
+    rest, tris, source = load_rest(S)
     tip = int(np.argmax(rest[:, 1]))
     pivot = rest[tip].copy()
 
@@ -214,6 +230,7 @@ def playback(scene, obj, pc2, S):
     cache.frame_start, cache.frame_scale = 0, 1
     solid = baked.modifiers.new('Thickness', 'SOLIDIFY')
     solid.thickness, solid.offset = S['thickness'], 0.0
+    solid.material_offset, solid.material_offset_rim = 1, 0     # the inner shell is the lining
     smooth = baked.modifiers.new('Smooth', 'SUBSURF')
     smooth.levels, smooth.render_levels = 0, S['smooth']
     smooth.show_render = S['smooth'] > 0
@@ -224,15 +241,20 @@ def playback(scene, obj, pc2, S):
 def stage(scene, S, rest):
     """Camera, lights and material, matching the page."""
     obj = scene.objects['Cloak (baked)']
-    mat = bpy.data.materials.new('Carpet')
-    mat.use_nodes = True
-    bsdf = mat.node_tree.nodes['Principled BSDF']
-    bsdf.inputs['Base Color'].default_value = srgb('#FF6625')
-    bsdf.inputs['Roughness'].default_value = 0.62
-    bsdf.inputs['Sheen Weight'].default_value = 0.5
-    bsdf.inputs['Sheen Roughness'].default_value = 0.5
-    bsdf.inputs['Sheen Tint'].default_value = srgb('#FFCDB4')
-    obj.data.materials.append(mat)
+    # Orange outside, ink inside: in the logo the inside of the curl is #130F02.
+    def fabric(name, colour, sheen):
+        mat = bpy.data.materials.new(name)
+        mat.use_nodes = True
+        bsdf = mat.node_tree.nodes['Principled BSDF']
+        bsdf.inputs['Base Color'].default_value = srgb(colour)
+        bsdf.inputs['Roughness'].default_value = 0.62
+        bsdf.inputs['Sheen Weight'].default_value = sheen
+        bsdf.inputs['Sheen Roughness'].default_value = 0.5
+        bsdf.inputs['Sheen Tint'].default_value = srgb('#FFCDB4')
+        bsdf.inputs['Specular IOR Level'].default_value = S['specular']
+        obj.data.materials.append(mat)
+    fabric('Carpet', S['face'], S['sheen'])
+    fabric('Lining', S['lining'], 0.0)
 
     # Orthographic, head-on, framed like a 960x600 page.
     cam_data = bpy.data.cameras.new('Camera')
@@ -254,7 +276,7 @@ def stage(scene, S, rest):
         ob.rotation_mode = 'QUATERNION'
         ob.rotation_quaternion = (-to_blender(page_dir)).to_track_quat('-Z', 'Y')
         scene.collection.objects.link(ob)
-    sun('Key', (-2.4, 3.2, 2.8), '#FFF1E4', 3.2, 6)
+    sun('Key', (-2.4, 3.2, 2.8), '#FFF1E4', S['key'], 6)
     sun('Fill', (3.0, -0.6, 1.4), '#F0E4E0', 0.35, 20)
 
     # Sky above, the brand's dark bounce below — the page's hemisphere light.
@@ -307,6 +329,15 @@ def main():
                'layout': 'float32 little-endian [frame][vertex][x,y,z], page coordinates (Y up), world space'},
               open(os.path.join(out_dir, 'flyin-meta.json'), 'w'), indent=2)
     print(f'simulated {frames} frames of {pos.shape[1]} vertices')
+
+    # Where it lands, head-on, against the logo.
+    import fit_logo
+    logo = fit_logo.draw_logo(fit_logo.logo_to_rest(fit_logo.svg_paths(fit_logo.SVG)))
+    landed = fit_logo.iou(fit_logo.draw_model(pos[-1], load_page_mesh()[1]), logo)
+    print('landed against the logo: ' + '  '.join(f'{k} {v*100:.1f}%' for k, v in landed.items()))
+    meta = json.load(open(os.path.join(out_dir, 'flyin-meta.json')))
+    meta['landed_vs_logo'] = {k: round(float(v), 4) for k, v in landed.items()}
+    json.dump(meta, open(os.path.join(out_dir, 'flyin-meta.json'), 'w'), indent=2)
 
     playback(scene, obj, pc2, S)
     stage(scene, S, rest)

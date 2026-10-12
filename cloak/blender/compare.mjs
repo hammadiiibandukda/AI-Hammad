@@ -58,8 +58,14 @@ const angle = (P, [a,bb,c,d]) => {
   const l=Math.hypot(...n1)*Math.hypot(...n2)||1;
   return Math.acos(Math.max(-1, Math.min(1, (n1[0]*n2[0]+n1[1]*n2[1]+n1[2]*n2[2])/l)));
 };
-const restAngles = hinges.map(h => angle(rest, h));
-const fold = (P) => Math.max(...hinges.map((h,k) => Math.abs(angle(P,h)-restAngles[k]))) * 180/Math.PI;
+// Each is measured against its own rest pose: Blender's may be the one fitted
+// to the logo (fit_logo.py), which bends differently from the page's.
+const fittedFile = path.join(HERE, 'rest-fitted.json');
+const refRest = meta.settings.rest === 'fitted' && fs.existsSync(fittedFile)
+  ? new Float32Array(bytes(JSON.parse(fs.readFileSync(fittedFile, 'utf8')).positions)) : rest;
+const foldFrom = (R0) => { const a0 = hinges.map(h => angle(R0, h));
+  return (P) => Math.max(...hinges.map((h,k) => Math.abs(angle(P,h)-a0[k]))) * 180/Math.PI; };
+const fold = foldFrom(rest), refFoldOf = foldFrom(refRest);
 let x0=Infinity, x1=-Infinity; for (let i=0;i<N;i++) { x0=Math.min(x0,rest[i*3]); x1=Math.max(x1,rest[i*3]); }
 const width = x1 - x0;
 
@@ -72,7 +78,7 @@ for (const t of times) {
   const P = await p.evaluate(()=>Array.from(window.__cloak._cloth.pos));
   const R = refAt(t);
   let d = 0; for (let i=0;i<N;i++) d += Math.hypot(P[i*3]-R[i*3], P[i*3+1]-R[i*3+1], P[i*3+2]-R[i*3+2]);
-  rows.push({ t, apart: d/N/width, pageFold: fold(P), refFold: fold(R), shot: await p.screenshot({type:'jpeg', quality:80}) });
+  rows.push({ t, apart: d/N/width, pageFold: fold(P), refFold: refFoldOf(R), shot: await p.screenshot({type:'jpeg', quality:80}) });
 }
 console.log('  time   page vs Blender   sharpest fold: page   Blender');
 for (const r of rows) console.log(`  ${r.t.toFixed(1)}s   ${(r.apart*100).toFixed(1).padStart(5)}% apart       ${r.pageFold.toFixed(0).padStart(4)}°     ${r.refFold.toFixed(0).padStart(4)}°`);

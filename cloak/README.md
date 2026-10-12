@@ -161,8 +161,21 @@ see.)
 
 `blender/` holds the fly-in simulated as real cloth in Blender — what the
 page's live simulation is tuned against. It runs the page's own mesh (read
-out of `cloak.html`), along the page's path, with the page's timing, camera,
-lights and colour, so the two can be compared point for point.
+out of `cloak.html`, then fitted to the logo — below), along the page's path,
+with the page's timing, camera and lights, so the two can be compared point
+for point.
+
+**The logo.** `logo.svg` is the reference: the body `#FF550C`, the inside of
+the curl `#130F02`. Seen head-on, the Blender model matched it at 92% on the
+outline and 80% on the inside of the curl — its upper-left edge bowed out
+where the logo's curves in, and the top edge of the curl sat low.
+`fit_logo.py` reshapes the rest pose in the plane of the screen only (depth
+is untouched) to line both up: the smoothest thin-plate-spline warp that
+matches the model's outline and the seam between its face and the inside of
+the curl to the logo's, found by matching nearest edge points both ways and
+letting it bend a little more each round. Points move 2.8% of the width on
+average, 5.3% at most. The lining is ink, so the inside of the cloak shows
+dark whenever it turns over in flight, not just in the curl.
 
 Only the tip is steered: it's pinned to the path. Everything else is
 Blender's cloth solver — no gravity, self-collision on, air damping, and the
@@ -176,6 +189,7 @@ spacing of the thin triangles at the tip. At 0.012 the solver pushed them
 apart into permanent dents along the right edge; at 0.004 it lands clean.
 
 ```sh
+python blender/fit_logo.py [logo.svg]         # fit the rest pose to the logo head-on
 python blender/flyin.py                       # simulate; writes the files below
 python blender/flyin.py '{"render": "preview"}'   # ... and render every frame
 node blender/compare.mjs [frames_dir]          # the page against it, moment by moment
@@ -190,9 +204,11 @@ Cache modifier plays) and `cloak_flyin.blend` — open that in Blender: the
 | | |
 |---|---|
 | frames | 121 at 30fps — 0.15s of empty page, 2.6s of flight, 1.25s to settle |
-| sharpest fold in flight | 47° (page: 6°) |
-| after landing | within 0.1% of the logo pose, sharpest fold about 10° |
+| landed, head-on, against the logo | outline 99.5% · face 99.5% · inside of the curl 97.3% · 0.2% spills outside it |
+| rendered colour, lit face / inside | `#FF5118` / `#18130D` (logo: `#FF550C` / `#130F02`) |
+| sharpest fold in flight | 34° (page: 6°) |
 | page against it in flight | up to 1.4 widths apart: the page runs about half a second behind its own path |
+| page against it at rest | 2.8% apart — the page hasn't taken the fitted pose yet |
 
 ## The reference loader
 
@@ -263,9 +279,10 @@ The form itself belongs to the Blender file.
 
 ## Known limits
 
-- The model's front view matches the flat SVG at about 80% silhouette IoU.
-  That's a comparison of two references, not an error: the model is the
-  source of truth for the form now, and the SVG is a flat drawing of it.
+- The page still runs the model as modelled, which matches the logo at
+  about 80% head-on in its own check (`verify.mjs`, against the original
+  SVG). The Blender reference runs the pose fitted to `logo.svg`; moving the
+  page onto it is the next step.
 - The lit face reads close to `#FF6625` but not exactly, and the inside of
   the curl close to the artwork's `#D0470C` rather than on it — a lighting
   judgement, not a fit.
